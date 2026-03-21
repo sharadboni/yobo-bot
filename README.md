@@ -123,17 +123,72 @@ make logs-gateway     # Tail gateway logs
 make logs-agent       # Tail agent logs
 ```
 
+## Smart Routing
+
+Messages are automatically routed to the right model:
+
+```
+User message
+  |
+  v
+Classifier (4B, 1 token, ~1s) — "Does this need external data?"
+  |
+  ├── No  → Fast model (4B, no_think, max 512 tokens, ~5s)
+  |
+  └── Yes → Tool model (9B, thinking ON, web_search/news/wiki, ~10-30s)
+```
+
+This keeps simple conversations fast while complex queries that need web search, news, or Wikipedia get the full tool-calling model with reasoning.
+
+### Thinking mode
+
+The `no_think` trick prefills an empty `<think></think>` block as an assistant message, making Qwen3 skip reasoning and respond directly. This halves response time for simple tasks.
+
+| Path | Model | Thinking | Why |
+|---|---|---|---|
+| Classifier | 4B | OFF | Just needs "yes" or "no" |
+| Simple chat | 4B | OFF | Fast conversational replies |
+| Tool calling | 9B | ON | Needs to reason about which tools to use and synthesize results |
+| /search summary | 9B | OFF | Data already fetched, just summarize |
+| /podcast script | 9B | OFF | Creative output, no reasoning needed |
+| Scheduler handlers | 9B | OFF | Summaries from pre-fetched data |
+
+## WhatsApp Formatting
+
+All LLM output is stripped of markdown before sending — plain text only. The system prompt instructs the LLM to avoid formatting, and a post-processor (`markdown_to_whatsapp`) catches any remaining markdown:
+
+- `**bold**` / `*italic*` -> plain text
+- `## Headers` -> plain text
+- `[links](url)` -> text (url)
+- Bullet points -> plain text
+- Code blocks -> removed
+
+## Connection Resilience
+
+- Agent uses WebSocket ping/pong (20s interval, 10s timeout) to detect dead connections
+- Gateway retries failed WhatsApp sends up to 3 times with 5s delay (handles connection drops)
+- `make restart` cleanly stops all processes before starting new ones
+- `make stop` kills by PID file + orphan cleanup on port 8765
+
 ## LLM Configuration
 
 Edit `agent/llm_config.yaml` to configure endpoints per capability. Each has a fallback chain — providers are tried in order.
 
 ```yaml
-text:
+text:                                  # For tool calling (web search, news, wiki)
   - name: local-llm
     base_url: http://YOUR_LAN_IP:52415/v1
     api_key: "no-key"
     model: mlx-community/Qwen3.5-9B-8bit
     max_tokens: 32000
+    temperature: 0.5
+
+text_fast:                             # For simple chat (no tools needed)
+  - name: local-fast
+    base_url: http://YOUR_LAN_IP:52415/v1
+    api_key: "no-key"
+    model: mlx-community/Qwen3.5-4B-4bit
+    max_tokens: 256
     temperature: 0.5
 
 vision:

@@ -26,24 +26,33 @@ agent:
 	.venv/bin/python -m agent.main
 
 # Run background
-start: setup-data
+start: stop setup-data
 	@mkdir -p $(LOGS_DIR)
 	@echo "Starting gateway..."
-	@cd gateway && nohup node src/index.js > ../$(LOGS_DIR)/gateway.log 2>&1 & echo $$! > ../$(LOGS_DIR)/gateway.pid
+	@nohup node gateway/src/index.js > $(LOGS_DIR)/gateway.log 2>&1 & echo $$! > $(LOGS_DIR)/gateway.pid
 	@echo "Gateway started (PID $$(cat $(LOGS_DIR)/gateway.pid)), logs: $(LOGS_DIR)/gateway.log"
+	@sleep 2
 	@echo "Starting agent..."
 	@nohup .venv/bin/python -m agent.main > $(LOGS_DIR)/agent.log 2>&1 & echo $$! > $(LOGS_DIR)/agent.pid
 	@echo "Agent started (PID $$(cat $(LOGS_DIR)/agent.pid)), logs: $(LOGS_DIR)/agent.log"
 
+restart: stop
+	@sleep 2
+	@$(MAKE) start
+
 stop:
+	@# Kill by PID file
 	@if [ -f $(LOGS_DIR)/gateway.pid ]; then \
-		kill $$(cat $(LOGS_DIR)/gateway.pid) 2>/dev/null && echo "Gateway stopped" || echo "Gateway not running"; \
+		kill $$(cat $(LOGS_DIR)/gateway.pid) 2>/dev/null && echo "Gateway stopped (pid)" || true; \
 		rm -f $(LOGS_DIR)/gateway.pid; \
-	else echo "No gateway PID file"; fi
+	fi
 	@if [ -f $(LOGS_DIR)/agent.pid ]; then \
-		kill $$(cat $(LOGS_DIR)/agent.pid) 2>/dev/null && echo "Agent stopped" || echo "Agent not running"; \
+		kill $$(cat $(LOGS_DIR)/agent.pid) 2>/dev/null && echo "Agent stopped (pid)" || true; \
 		rm -f $(LOGS_DIR)/agent.pid; \
-	else echo "No agent PID file"; fi
+	fi
+	@# Also kill any orphan node gateway on the WS port
+	@-lsof -t -i:8765 2>/dev/null | xargs -r kill 2>/dev/null
+	@sleep 1
 
 status:
 	@if [ -f $(LOGS_DIR)/gateway.pid ] && kill -0 $$(cat $(LOGS_DIR)/gateway.pid) 2>/dev/null; then \

@@ -7,7 +7,7 @@ import websockets
 from agent.config import WS_URL
 from agent.graph import build_graph
 from agent.admin import AdminState, handle_admin_command
-from agent.sanitize import sanitize_user_input, sanitize_llm_output
+from agent.sanitize import sanitize_user_input, sanitize_llm_output, markdown_to_whatsapp
 from agent.jid import normalize_jid
 from agent.services.scheduler import run_scheduler, register_handler, outbound_queue
 from agent.services.task_handlers import handle_news, handle_search, handle_podcast
@@ -86,6 +86,7 @@ async def handle_message(send_fn, payload: dict):
     reply = result.get("reply_text", "")
     if reply:
         reply = sanitize_llm_output(reply, user_jid=sender)
+        reply = markdown_to_whatsapp(reply)
     if reply:
         reply_msg = {
             "type": "reply",
@@ -131,7 +132,12 @@ async def main():
 
     while True:
         try:
-            async with websockets.connect(WS_URL) as ws:
+            async with websockets.connect(
+                WS_URL,
+                ping_interval=20,   # send ping every 20s
+                ping_timeout=10,    # wait 10s for pong before closing
+                close_timeout=5,
+            ) as ws:
                 log.info("Connected to gateway")
                 send_fn = lambda msg: _send(ws, msg)
 
@@ -150,7 +156,6 @@ async def main():
                     async for raw in ws:
                         try:
                             payload = json.loads(raw)
-                            # Process messages concurrently — don't block on long operations
                             task = asyncio.create_task(handle_message(send_fn, payload))
                             task.add_done_callback(_on_task_done)
                         except Exception as e:

@@ -154,6 +154,32 @@ def strip_markdown(text: str) -> str:
     return text.strip()
 
 
+def markdown_to_whatsapp(text: str) -> str:
+    """Strip all markdown/formatting to plain text for WhatsApp."""
+    if not text:
+        return text
+    # Headers
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+    # Bold/italic (all variants)
+    text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
+    text = re.sub(r"_{1,3}([^_]+)_{1,3}", r"\1", text)
+    # Strikethrough
+    text = re.sub(r"~~([^~]+)~~", r"\1", text)
+    # Links [text](url) → text (url)
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
+    # Code blocks
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    # Inline code
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    # Bullet points
+    text = re.sub(r"^[\s]*[-*+]\s+", "", text, flags=re.MULTILINE)
+    # Blockquotes
+    text = re.sub(r"^>\s+", "", text, flags=re.MULTILINE)
+    # Collapse whitespace
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def sanitize_llm_output(text: str, user_jid: str = "") -> str:
     """Sanitize LLM output to prevent accidental data leaks.
     Redacts patterns that look like JIDs, file paths, or API keys."""

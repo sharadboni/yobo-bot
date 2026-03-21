@@ -90,6 +90,29 @@ async def chat_completion(messages: list[dict], **overrides) -> str:
     raise RuntimeError(f"All text providers failed. Last: {last_err}")
 
 
+async def chat_completion_fast(messages: list[dict], **overrides) -> str:
+    """Fast text completion using the text_fast model (smaller, capped tokens).
+    Always uses no_think. Falls back to regular text providers.
+    """
+    last_err = None
+    providers = LLM_CONFIG.get("text_fast", []) or _get_providers("text")
+    for p in providers:
+        try:
+            client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=60.0)
+            msgs = list(messages) + [_THINK_PREFILL]
+            resp = await client.chat.completions.create(
+                model=p["model"],
+                messages=msgs,
+                max_tokens=overrides.get("max_tokens", p.get("max_tokens", 256)),
+                temperature=overrides.get("temperature", p.get("temperature", 0.5)),
+            )
+            return _extract_content(resp.choices[0])
+        except Exception as e:
+            log.warning("[text_fast] %s failed: %s", p["name"], e)
+            last_err = e
+    raise RuntimeError(f"All text_fast providers failed. Last: {last_err}")
+
+
 async def chat_completion_with_tools(
     messages: list[dict],
     tools: list[dict],
@@ -108,10 +131,10 @@ async def chat_completion_with_tools(
     last_err = None
     for p in _get_providers("text"):
         try:
-            client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"])
+            client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=180.0)
             msgs = list(messages)
 
-            for _ in range(max_rounds):
+            for round_num in range(max_rounds):
                 resp = await client.chat.completions.create(
                     model=p["model"],
                     messages=msgs,

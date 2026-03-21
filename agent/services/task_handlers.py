@@ -25,7 +25,7 @@ async def handle_news(task: dict) -> str:
             ),
         },
     ]
-    return await chat_completion(messages)
+    return await chat_completion(messages, no_think=True)
 
 
 async def handle_search(task: dict) -> str:
@@ -44,7 +44,7 @@ async def handle_search(task: dict) -> str:
             ),
         },
     ]
-    return await chat_completion(messages)
+    return await chat_completion(messages, no_think=True)
 
 
 async def handle_podcast(task: dict) -> str:
@@ -69,4 +69,4 @@ async def handle_podcast(task: dict) -> str:
         {"role": "system", "content": PODCAST_SCRIPT_PROMPT},
         {"role": "user", "content": f"Topic: {topic}\n\n{research}\n\nWrite the podcast script now."},
     ]
-    return await chat_completion(messages, max_tokens=2048)
+    return await chat_completion(messages, max_tokens=2048, no_think=True)

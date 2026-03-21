@@ -28,5 +28,5 @@ async def web_search(state: dict) -> dict:
         },
     ]
 
-    reply = await chat_completion(messages)
+    reply = await chat_completion(messages, no_think=True)
     return {"reply_text": reply}
