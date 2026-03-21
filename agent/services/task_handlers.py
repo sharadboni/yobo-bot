@@ -1,7 +1,7 @@
 """Scheduler task handlers — executed by the background scheduler, not the pipeline."""
 from __future__ import annotations
 import logging
-from agent.tools import web_search, read_page
+from agent.tools import web_search, news_search, read_page
 from agent.services.llm import chat_completion
 from agent.config import SYSTEM_PROMPT
 from agent.skills.podcast import PODCAST_SCRIPT_PROMPT
@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 async def handle_news(task: dict) -> str:
     """Fetch news on a topic and summarize."""
     topic = task["task_args"]
-    results = await web_search(f"{topic} latest news today")
+    results = await news_search(topic)
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

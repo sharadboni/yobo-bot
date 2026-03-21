@@ -28,19 +28,62 @@ def _strip_think(text: str) -> str:
     return result.strip() or text.strip()
 
 
+def _extract_content(choice) -> str:
+    """Extract text from a completion choice, handling reasoning_content models.
+
+    Qwen3 models on exo put everything in reasoning_content with content="".
+    The actual answer is typically after the reasoning, often following markers
+    like 'Final Response:', 'Final Answer:', or after the last numbered step.
+    """
+    content = choice.message.content or ""
+    stripped = _strip_think(content)
+    if stripped:
+        return stripped
+
+    # Fallback: extract from reasoning_content
+    reasoning = getattr(choice.message, "reasoning_content", "") or ""
+    if not reasoning:
+        return content.strip()
+
+    # Try to find the final answer after common markers
+    for marker in [
+        "Final Response:", "Final Answer:", "Final Output:",
+        "Response:", "Answer:", "Output:",
+        "Here is the", "Here's the",
+    ]:
+        idx = reasoning.rfind(marker)
+        if idx != -1:
+            answer = reasoning[idx + len(marker):].strip()
+            if answer:
+                return _strip_think(answer)
+
+    # No marker found — use the full reasoning with think tags stripped
+    return _strip_think(reasoning)
+
+
+_THINK_PREFILL = {"role": "assistant", "content": "<think>\n\n</think>\n", "prefix": True}
+
+
 async def chat_completion(messages: list[dict], **overrides) -> str:
-    """Text completion with fallback."""
+    """Text completion with fallback.
+
+    Set no_think=True to disable thinking mode via assistant prefill.
+    """
+    no_think = overrides.pop("no_think", False)
     last_err = None
     for p in _get_providers("text"):
         try:
-            client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"])
+            client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=180.0)
+            msgs = list(messages)
+            if no_think:
+                msgs.append(_THINK_PREFILL)
             resp = await client.chat.completions.create(
                 model=p["model"],
-                messages=messages,
+                messages=msgs,
                 max_tokens=overrides.get("max_tokens", p["max_tokens"]),
                 temperature=overrides.get("temperature", p["temperature"]),
             )
-            return _strip_think(resp.choices[0].message.content)
+            return _extract_content(resp.choices[0])
         except Exception as e:
             log.warning("[text] %s failed: %s", p["name"], e)
             last_err = e
@@ -80,8 +123,7 @@ async def chat_completion_with_tools(
 
                 # No tool calls — return the final text
                 if choice.finish_reason != "tool_calls" or not choice.message.tool_calls:
-                    content = choice.message.content or ""
-                    return _strip_think(content)
+                    return _extract_content(choice)
 
                 # Process tool calls
                 msgs.append(choice.message)
@@ -115,7 +157,7 @@ async def chat_completion_with_tools(
                 max_tokens=overrides.get("max_tokens", p["max_tokens"]),
                 temperature=overrides.get("temperature", p["temperature"]),
             )
-            return _strip_think(resp.choices[0].message.content or "")
+            return _extract_content(resp.choices[0])
         except Exception as e:
             log.warning("[text+tools] %s failed: %s", p["name"], e)
             last_err = e
@@ -141,14 +183,14 @@ async def vision_completion(image_b64: str, prompt: str, **overrides) -> str:
 
 async def _mlx_omni_vision(p: dict, image_b64: str, prompt: str, **overrides) -> str:
     """Call mlx-omni-server POST /v1/vision."""
-    url = f"{p['base_url'].rstrip('/')}/v1/vision"
+    url = f"{p['base_url'].rstrip('/')}/vision"
     payload = {
         "image": image_b64,
         "prompt": prompt,
         "max_tokens": overrides.get("max_tokens", p.get("max_tokens", 2048)),
         "temperature": overrides.get("temperature", p.get("temperature", 0.7)),
     }
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=180) as client:
         resp = await client.post(url, json=payload)
         resp.raise_for_status()
         return resp.json()["text"]
@@ -156,7 +198,7 @@ async def _mlx_omni_vision(p: dict, image_b64: str, prompt: str, **overrides) ->
 
 async def _openai_vision(p: dict, image_b64: str, prompt: str, **overrides) -> str:
     """Call OpenAI-compatible chat completions with image."""
-    client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"])
+    client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=120.0)
     messages = [
         {
             "role": "user",
@@ -181,7 +223,7 @@ async def transcribe_audio(audio_bytes: bytes, mimetype: str = "audio/ogg") -> s
     last_err = None
     for p in _get_providers("stt"):
         try:
-            client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"])
+            client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=120.0)
             with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as f:
                 f.write(audio_bytes)
                 tmp_path = f.name
@@ -226,7 +268,7 @@ async def synthesize_speech(
                 }
                 if ref_text:
                     payload["ref_text"] = ref_text
-                async with httpx.AsyncClient(timeout=120) as client:
+                async with httpx.AsyncClient(timeout=300) as client:
                     resp = await client.post(
                         f"{p['base_url'].rstrip('/')}/audio/speech",
                         json=payload,
@@ -234,7 +276,7 @@ async def synthesize_speech(
                     resp.raise_for_status()
                     audio_bytes = resp.content
             else:
-                client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"])
+                client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=300.0)
                 resp = await client.audio.speech.create(
                     model=p["model"],
                     voice=voice_name or p.get("voice", "alloy"),

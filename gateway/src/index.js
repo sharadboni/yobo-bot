@@ -29,10 +29,18 @@ async function main() {
             return;
         }
 
+        // Typing indicator from agent (for long operations)
+        if (msg.type === 'typing') {
+            try {
+                const to = msg.to || normalizeJid(config.adminJid);
+                await wa.sendPresenceUpdate('composing', to);
+            } catch (e) { /* ignore */ }
+            return;
+        }
+
         let to, text;
 
         if (msg.type === 'admin_notify') {
-            // Send to admin's self-chat (must use JID without device suffix)
             to = normalizeJid(config.adminJid);
             text = msg.content?.text;
             log.info({ to, adminJid: config.adminJid }, 'Admin notify');
@@ -54,7 +62,7 @@ async function main() {
                 await wa.sendMessage(to, {
                     audio: audioBuffer,
                     mimetype: msg.content.audio_mimetype || 'audio/ogg; codecs=opus',
-                    ptt: true,  // send as voice note
+                    ptt: true,
                 });
                 log.info({ to }, 'Sent voice reply');
             }
@@ -64,6 +72,11 @@ async function main() {
             log.info({ to }, 'Sent text reply');
         } catch (err) {
             log.error({ err, to }, 'Failed to send WhatsApp message');
+        } finally {
+            // Stop typing indicator after reply is sent (or failed)
+            try {
+                await wa.sendPresenceUpdate('paused', to);
+            } catch (e) { /* ignore */ }
         }
     };
 

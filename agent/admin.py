@@ -31,6 +31,26 @@ async def handle_admin_command(send_fn, admin: AdminState, sender: str, text: st
     """Handle admin commands. Returns True if a command was handled."""
     cmd = text.strip().lower()
 
+    if cmd == "/help":
+        await send_fn({"type": "reply", "to": sender, "content": {"text": (
+            "*Admin Commands:*\n\n"
+            "/add <number> — Approve a user\n"
+            "/add — Approve the last pending user\n"
+            "/ignore <number> — Ignore a user\n"
+            "/clear — Clear all WhatsApp chats\n"
+            "/clear <number> — Clear a specific chat\n"
+            "/help — Show this message\n\n"
+            "*User Commands (also available to admin):*\n\n"
+            "/search <query> — Search the web\n"
+            "/podcast <topic> — Generate a podcast voice note\n"
+            "/schedule <type> <freq> [day] <time> [--audio] <topic> — Schedule a task\n"
+            "/schedules — List your scheduled tasks\n"
+            "/unschedule <id> — Remove a scheduled task\n"
+            "/voice — Manage TTS voice\n\n"
+            "Or just send a message to chat!"
+        )}})
+        return True
+
     if cmd.startswith("/add"):
         arg = text.strip()[4:].strip().lstrip("+")
         number = arg if arg else admin.last_pending_number

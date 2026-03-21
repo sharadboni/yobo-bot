@@ -113,6 +113,11 @@ export async function startWhatsApp(bridge, log) {
 
             log.info({ from, contentType: content.type }, 'Inbound message');
 
+            // Show typing indicator while processing
+            try {
+                await sock.sendPresenceUpdate('composing', from);
+            } catch (e) { /* ignore presence errors */ }
+
             bridge.sendToAgent({
                 type: 'message',
                 id: msg.key.id || uuidv4(),

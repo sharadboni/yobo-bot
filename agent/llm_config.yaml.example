@@ -43,7 +43,7 @@ tts:
   - name: mlx-omni
     base_url: http://YOUR_LAN_IP:8765/v1
     api_key: "no-key"
-    model: mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit
-    voice: Chelsie
+    model: mlx-community/Kokoro-82M-bf16
+    voice: af_heart              # Kokoro: af_heart, af_bella, am_adam, bf_alice, etc.
     response_format: opus      # opus | mp3 | aac | flac | wav
     speed: 1.0

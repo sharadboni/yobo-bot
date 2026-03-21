@@ -46,22 +46,35 @@ async def handle_message(send_fn, payload: dict):
         if handled:
             return
 
-    # Run pipeline
-    result = await graph.ainvoke({
-        "inbound": payload,
-        "user_jid": sender,
-        "push_name": payload.get("pushName", ""),
-        "admin_jid": admin.admin_jid,
-        "user_profile": {},
-        "resolved_text": "",
-        "content_type": "",
-        "intent": "",
-        "intent_args": "",
-        "reply_text": "",
-        "reply_audio": "",
-        "reply_audio_mimetype": "",
-        "outbound": [],
-    })
+    # Keep typing indicator alive during pipeline execution
+    async def keep_typing():
+        while True:
+            await asyncio.sleep(20)
+            try:
+                await send_fn({"type": "typing", "to": sender})
+            except Exception:
+                break
+
+    typing_task = asyncio.create_task(keep_typing())
+
+    try:
+        result = await graph.ainvoke({
+            "inbound": payload,
+            "user_jid": sender,
+            "push_name": payload.get("pushName", ""),
+            "admin_jid": admin.admin_jid,
+            "user_profile": {},
+            "resolved_text": "",
+            "content_type": "",
+            "intent": "",
+            "intent_args": "",
+            "reply_text": "",
+            "reply_audio": "",
+            "reply_audio_mimetype": "",
+            "outbound": [],
+        })
+    finally:
+        typing_task.cancel()
 
     # Send outbound messages (admin notifications etc.)
     for out_msg in result.get("outbound", []):
@@ -89,8 +102,21 @@ async def handle_message(send_fn, payload: dict):
              result.get("intent"), result.get("content_type"), bool(result.get("reply_audio")))
 
 
+_send_lock = asyncio.Lock()
+
+
+def _on_task_done(task: asyncio.Task):
+    """Log exceptions from background message handler tasks."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        log.error("Message handler failed: %s", exc, exc_info=exc)
+
+
 async def _send(ws, msg: dict):
-    await ws.send(json.dumps(msg))
+    async with _send_lock:
+        await ws.send(json.dumps(msg))
 
 
 async def main():
@@ -124,7 +150,9 @@ async def main():
                     async for raw in ws:
                         try:
                             payload = json.loads(raw)
-                            await handle_message(send_fn, payload)
+                            # Process messages concurrently — don't block on long operations
+                            task = asyncio.create_task(handle_message(send_fn, payload))
+                            task.add_done_callback(_on_task_done)
                         except Exception as e:
                             log.error("Error handling message: %s", e, exc_info=True)
                 finally:

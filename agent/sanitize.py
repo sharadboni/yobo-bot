@@ -120,6 +120,40 @@ def wrap_tool_result(text: str, tool_name: str) -> str:
     )
 
 
+def strip_markdown(text: str) -> str:
+    """Remove all markdown formatting. Used before TTS and anywhere plain text is needed."""
+    if not text:
+        return text
+    # Headers
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+    # Bold/italic (handle nested: ***bold italic***)
+    text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
+    text = re.sub(r"_{1,3}([^_]+)_{1,3}", r"\1", text)
+    # Strikethrough
+    text = re.sub(r"~~([^~]+)~~", r"\1", text)
+    # Links [text](url) → text
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # Bare URLs
+    text = re.sub(r"https?://\S+", "", text)
+    # Inline code
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    # Code blocks
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    # Bullet points and numbered lists → plain sentences
+    text = re.sub(r"^[\s]*[-*+]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^[\s]*\d+\.\s+", "", text, flags=re.MULTILINE)
+    # Blockquotes
+    text = re.sub(r"^>\s+", "", text, flags=re.MULTILINE)
+    # HTML tags
+    text = re.sub(r"<[^>]+>", "", text)
+    # Non-breaking spaces
+    text = text.replace("\u00a0", " ").replace("&nbsp;", " ")
+    # Collapse whitespace
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    return text.strip()
+
+
 def sanitize_llm_output(text: str, user_jid: str = "") -> str:
     """Sanitize LLM output to prevent accidental data leaks.
     Redacts patterns that look like JIDs, file paths, or API keys."""

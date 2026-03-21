@@ -10,10 +10,15 @@ log = logging.getLogger(__name__)
 
 VOICES_DIR = os.getenv("VOICES_DIR", "data/voices")
 
-# Built-in voice presets (no ref audio needed)
+# Built-in Kokoro voice presets (no ref audio needed)
 BUILTIN_VOICES = [
-    "Chelsie", "Ethan", "Ayla", "Noah", "Phoebe",
-    "Daniel", "Sophia", "James", "Emily", "Oliver",
+    # American English
+    "af_heart", "af_bella", "af_nova", "af_sky",
+    "am_adam", "am_echo", "am_eric", "am_liam",
+    # Spanish
+    "ef_dora", "em_alex", "em_santa",
+    # Hindi
+    "hf_alpha", "hf_beta", "hm_omega", "hm_psi",
 ]
 
 
@@ -32,7 +37,7 @@ def _voice_meta_path(user_jid: str) -> str:
 def _load_meta(user_jid: str) -> dict:
     path = _voice_meta_path(user_jid)
     if not os.path.exists(path):
-        return {"active": "Chelsie", "custom": {}, "pending": None}
+        return {"active": "af_heart", "custom": {}, "pending": None}
     with open(path, "r") as f:
         fcntl.flock(f, fcntl.LOCK_SH)
         data = json.load(f)
@@ -53,7 +58,7 @@ def get_active_voice(user_jid: str) -> dict:
     Returns: {"name": str, "ref_audio_b64": str|None, "ref_text": str|None}
     """
     meta = _load_meta(user_jid)
-    active = meta.get("active", "Chelsie")
+    active = meta.get("active", "af_heart")
 
     # Built-in voice
     if active in BUILTIN_VOICES:
@@ -62,13 +67,13 @@ def get_active_voice(user_jid: str) -> dict:
     # Custom voice
     custom = meta.get("custom", {}).get(active)
     if not custom:
-        return {"name": "Chelsie", "ref_audio_b64": None, "ref_text": None}
+        return {"name": "af_heart", "ref_audio_b64": None, "ref_text": None}
 
     # Load the audio file as base64
     audio_path = os.path.join(_user_voice_dir(user_jid), custom["filename"])
     if not os.path.exists(audio_path):
         log.warning("Voice audio missing: %s", audio_path)
-        return {"name": "Chelsie", "ref_audio_b64": None, "ref_text": None}
+        return {"name": "af_heart", "ref_audio_b64": None, "ref_text": None}
 
     with open(audio_path, "rb") as f:
         audio_b64 = base64.b64encode(f.read()).decode()
@@ -168,7 +173,7 @@ def remove_custom_voice(user_jid: str, name: str) -> bool:
     del custom[name]
     meta["custom"] = custom
     if meta.get("active") == name:
-        meta["active"] = "Chelsie"
+        meta["active"] = "af_heart"
     _save_meta(user_jid, meta)
     return True
 
@@ -179,7 +184,7 @@ def list_voices(user_jid: str) -> dict:
     """
     meta = _load_meta(user_jid)
     return {
-        "active": meta.get("active", "Chelsie"),
+        "active": meta.get("active", "af_heart"),
         "builtin": BUILTIN_VOICES,
         "custom": list(meta.get("custom", {}).keys()),
     }

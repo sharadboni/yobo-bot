@@ -51,7 +51,7 @@ export class WSBridge {
     }
 
     _handleAgentMessage(msg) {
-        if (msg.type === 'reply' || msg.type === 'admin_notify' || msg.type === 'clear_chats') {
+        if (msg.type === 'reply' || msg.type === 'admin_notify' || msg.type === 'clear_chats' || msg.type === 'typing') {
             if (this.onOutboundMessage) {
                 this.onOutboundMessage(msg);
             }

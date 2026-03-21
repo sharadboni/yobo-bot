@@ -10,13 +10,17 @@ WhatsApp <-> Gateway (Node.js/Baileys) <-> WebSocket :8765 <-> Agent (Python/Lan
 
 - **Admin approval** — new users must be approved via self-chat (`/add`, `/ignore`)
 - **Multi-modal input** — text, voice notes (STT), images (vision)
-- **Voice replies** — TTS voice notes for audio messages and podcasts
+- **Voice replies** — dual-model TTS: Kokoro (sub-second) for preset voices, Qwen3-TTS 1.7B for cloning
 - **Voice cloning** — users can clone voices from a 3-second audio sample
 - **LLM fallback** — configurable provider chain with per-capability endpoints
 - **Tool calling** — LLM auto-searches the web when needed (`web_search` + `read_page`)
-- **Web search fallback** — DuckDuckGo -> Bing (headless scrape) -> Google (headless scrape)
+- **Web search fallback** — DuckDuckGo -> Tavily -> Bing (scrape) -> Serper (Google) -> Yahoo (scrape)
+- **News search** — Google News RSS -> Reuters -> BBC -> AP (free, unlimited)
+- **Wikipedia** — factual lookups via Wikipedia REST API
 - **Podcast generation** — `/podcast <topic>` researches and generates a voice-note podcast
 - **Task scheduler** — users schedule recurring news/search/podcast deliveries
+- **Concurrent messaging** — send multiple messages without waiting, all process in parallel
+- **Typing indicator** — shows "typing..." while processing, stays active during long operations
 - **Prompt injection defenses** — input/output sanitization, URL validation, exfiltration blocking
 - **Per-user data isolation** — separate profile, schedule, and voice files per user
 
@@ -146,12 +150,26 @@ stt:
 tts:
   - name: mlx-omni
     base_url: http://YOUR_LAN_IP:8765/v1
-    model: mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit
-    voice: Chelsie
+    model: mlx-community/Kokoro-82M-bf16
+    voice: af_heart              # Kokoro: af_heart, af_bella, am_adam, bf_alice, etc.
     response_format: opus       # requires ffmpeg on the server
+# Voice cloning automatically uses Qwen3-TTS-1.7B when user has a custom voice
 ```
 
 Use `${ENV_VAR}` in YAML values to reference `.env` variables (e.g., `api_key: ${OPENAI_API_KEY}`).
+
+## LLM Tools
+
+The LLM can automatically call these tools during conversation:
+
+| Tool | Use case | Sources |
+|---|---|---|
+| `web_search` | General queries (weather, prices, facts) | DuckDuckGo -> Tavily -> Bing (scrape) -> Serper (Google) -> Yahoo (scrape) |
+| `news_search` | News, headlines, current events | Google News RSS -> Reuters RSS -> BBC RSS -> AP RSS -> fallback to web_search |
+| `wikipedia` | Facts, people, places, history, science | Wikipedia REST API (free, unlimited) |
+| `read_page` | Deep dive into a specific URL | Playwright headless browser |
+
+**Search fallback chain**: if one provider fails or rate-limits, the next is tried automatically. API-based providers (Tavily, Serper) require keys in `.env`. Scrape-based providers (Bing, Yahoo) use headless Chromium with rotating user agents.
 
 ## Commands
 
@@ -187,15 +205,21 @@ Use `${ENV_VAR}` in YAML values to reference `.env` variables (e.g., `api_key: $
 # Step 2: Send a voice note saying exactly that
 
 # The bot saves your voice and uses it for all future TTS replies
+# (uses Qwen3-TTS 1.7B for cloning — higher quality, slower)
 
-# Switch back to a built-in voice
-/voice set Chelsie
+# Switch back to a built-in Kokoro voice (sub-second, consistent)
+/voice set af_heart
 ```
 
-**Voice consistency notes:**
-- Custom cloned voices use speaker embedding extraction for consistency across generations
+**Dual-model TTS:**
+- **Kokoro 82M** (default) — sub-second latency, 54 preset voices, consistent output
+- **Qwen3-TTS 1.7B** (automatic for cloned voices) — better quality voice cloning from 3-10s samples
+- The server picks the right model automatically based on whether a custom voice is active
 - Including a transcript when adding a voice (`/voice add name <transcript>`) improves cloning quality
-- For best results, record a clear 3-10 second sample with minimal background noise
+
+**Kokoro voice presets:**
+- American: `af_heart`, `af_bella`, `af_nova`, `af_sky`, `am_adam`, `am_echo`, `am_eric`, `am_liam`
+- British: `bf_alice`, `bf_emma`, `bm_daniel`, `bm_george`
 
 ### Admin commands (self-chat only)
 | Command | Description |
