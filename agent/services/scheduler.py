@@ -16,8 +16,8 @@ SCHEDULES_DIR = os.getenv("SCHEDULES_DIR", "data/schedules")
 # Task type → async handler, registered at startup
 _task_handlers: dict = {}
 
-# Reference to the websocket send function, set by main.py
-_send_fn = None
+# Outbound message queue — scheduler pushes, main.py drains and sends
+outbound_queue: asyncio.Queue = asyncio.Queue()
 
 
 def register_handler(task_type: str, handler):
@@ -25,20 +25,11 @@ def register_handler(task_type: str, handler):
     _task_handlers[task_type] = handler
 
 
-def set_send_fn(fn):
-    """Set the function used to send messages back to users."""
-    global _send_fn
-    _send_fn = fn
-
-
-def _jid_to_number(jid: str) -> str:
-    return jid.split(":")[0].split("@")[0]
-
-
 def _user_schedule_path(user_jid: str) -> str:
     """Per-user schedule file: data/schedules/<number>.json"""
+    from agent.jid import jid_to_number
     os.makedirs(SCHEDULES_DIR, exist_ok=True)
-    return os.path.join(SCHEDULES_DIR, f"{_jid_to_number(user_jid)}.json")
+    return os.path.join(SCHEDULES_DIR, f"{jid_to_number(user_jid)}.json")
 
 
 def _load_user(user_jid: str) -> list[dict]:
@@ -161,25 +152,24 @@ async def _execute_task(task: dict):
         if not result_text:
             return
 
-        if _send_fn:
-            reply_msg = {
-                "type": "reply",
-                "to": task["user_jid"],
-                "content": {"text": f"📋 Scheduled update — {task['task_args']}:\n\n{result_text}"},
-            }
+        reply_msg = {
+            "type": "reply",
+            "to": task["user_jid"],
+            "content": {"text": f"Scheduled update — {task['task_args']}:\n\n{result_text}"},
+        }
 
-            # Generate audio if requested
-            if task.get("audio"):
-                try:
-                    from agent.services.llm import synthesize_speech
-                    import base64
-                    audio_bytes, mimetype = await synthesize_speech(result_text)
-                    reply_msg["content"]["audio"] = base64.b64encode(audio_bytes).decode()
-                    reply_msg["content"]["audio_mimetype"] = mimetype
-                except Exception as e:
-                    log.warning("Scheduled TTS failed: %s", e)
+        # Generate audio if requested
+        if task.get("audio"):
+            try:
+                from agent.services.llm import synthesize_speech
+                import base64
+                audio_bytes, mimetype = await synthesize_speech(result_text)
+                reply_msg["content"]["audio"] = base64.b64encode(audio_bytes).decode()
+                reply_msg["content"]["audio_mimetype"] = mimetype
+            except Exception as e:
+                log.warning("Scheduled TTS failed: %s", e)
 
-            await _send_fn(reply_msg)
+        await outbound_queue.put(reply_msg)
     except Exception as e:
         log.error("Scheduled task %s failed: %s", task["id"], e, exc_info=True)
 

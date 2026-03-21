@@ -5,6 +5,7 @@ import logging
 from urllib.parse import quote_plus
 from duckduckgo_search import DDGS
 from agent.config import SEARCH_MAX_RESULTS
+from agent.sanitize import sanitize_tool_output, wrap_tool_result
 
 log = logging.getLogger(__name__)
 
@@ -196,14 +197,15 @@ _SEARCH_PROVIDERS = [
 
 
 async def web_search(query: str) -> str:
-    """Execute a web search with provider fallback."""
+    """Execute a web search with provider fallback. Output is sanitized."""
     last_err = None
     for name, provider in _SEARCH_PROVIDERS:
         try:
             results = await provider(query)
             if results:
                 log.info("[search] %s returned %d results", name, len(results))
-                return _format_results(results)
+                raw = _format_results(results)
+                return sanitize_tool_output(raw, source="web_search")
         except Exception as e:
             log.warning("[search] %s failed: %s", name, e)
             last_err = e
@@ -231,7 +233,7 @@ async def read_page(url: str) -> str:
         text = await page.evaluate(JS_PAGE_TEXT, PAGE_TEXT_LIMIT)
         if not text:
             return "Page loaded but no readable text content found."
-        return text
+        return sanitize_tool_output(text, source="read_page")
     except Exception as e:
         return f"Failed to read page: {e}"
     finally:

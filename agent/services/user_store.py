@@ -7,25 +7,9 @@ import time
 import logging
 from agent.config import DATA_DIR, MAX_HISTORY
 from agent.models import new_profile
+from agent.jid import jid_to_number, normalize_jid, number_to_jid
 
 log = logging.getLogger(__name__)
-
-
-def jid_to_number(jid: str) -> str:
-    """Extract phone number from JID: '12345:2@s.whatsapp.net' → '12345'."""
-    return jid.split(":")[0].split("@")[0]
-
-
-def normalize_jid(jid: str) -> str:
-    """Strip device suffix: '12345:2@s.whatsapp.net' → '12345@s.whatsapp.net'."""
-    number = jid_to_number(jid)
-    return f"{number}@s.whatsapp.net"
-
-
-def number_to_jid(number: str) -> str:
-    """Convert phone number to JID."""
-    digits = "".join(c for c in number if c.isdigit())
-    return f"{digits}@s.whatsapp.net"
 
 
 def _user_path(jid: str) -> str:

@@ -13,6 +13,8 @@ SKILL_MAP = {
     "/schedule": "schedule_add",
     "/schedules": "schedule_list",
     "/unschedule": "schedule_remove",
+    "/voice": "voice",
+    "/v": "voice",
     "/help": "help",
 }
 

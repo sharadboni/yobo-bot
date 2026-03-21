@@ -1,10 +1,10 @@
 """LangGraph state definition."""
 from __future__ import annotations
-from typing import Any
-from langgraph.graph import MessagesState
+from typing import TypedDict
+from agent.models import UserProfile
 
 
-class AgentState(MessagesState):
+class AgentState(TypedDict):
     """State passed through the LangGraph pipeline."""
     # Inbound message from gateway
     inbound: dict             # raw WS payload
@@ -13,7 +13,7 @@ class AgentState(MessagesState):
     admin_jid: str            # admin's JID
 
     # User profile (loaded/created by load_user)
-    user_profile: dict
+    user_profile: UserProfile
 
     # Resolved content after input normalization
     resolved_text: str        # final text for LLM
@@ -25,6 +25,6 @@ class AgentState(MessagesState):
 
     # Skill output
     reply_text: str           # text to send back
-    reply_audio: str          # base64-encoded audio (TTS), empty if none
+    reply_audio: str          # base64-encoded audio (TTS)
     reply_audio_mimetype: str # mimetype of reply audio
     outbound: list[dict]      # messages to send via WS

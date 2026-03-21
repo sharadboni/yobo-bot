@@ -200,21 +200,50 @@ async def transcribe_audio(audio_bytes: bytes, mimetype: str = "audio/ogg") -> s
     raise RuntimeError(f"All STT providers failed. Last: {last_err}")
 
 
-async def synthesize_speech(text: str) -> tuple[bytes, str]:
-    """Text-to-speech with fallback. Returns (audio_bytes, mimetype)."""
+async def synthesize_speech(
+    text: str,
+    voice_name: str | None = None,
+    ref_audio_b64: str | None = None,
+    ref_text: str | None = None,
+) -> tuple[bytes, str]:
+    """Text-to-speech with fallback. Returns (audio_bytes, mimetype).
+
+    For voice cloning, pass ref_audio_b64 and optionally ref_text.
+    """
     last_err = None
     for p in _get_providers("tts"):
         try:
-            client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"])
             fmt = p.get("response_format", "opus")
-            resp = await client.audio.speech.create(
-                model=p["model"],
-                voice=p.get("voice", "alloy"),
-                input=text,
-                response_format=fmt,
-                speed=p.get("speed", 1.0),
-            )
-            audio_bytes = resp.content
+
+            # If we have reference audio, use direct HTTP to pass extra fields
+            if ref_audio_b64:
+                payload = {
+                    "input": text,
+                    "voice": voice_name or p.get("voice", "alloy"),
+                    "speed": p.get("speed", 1.0),
+                    "response_format": fmt,
+                    "ref_audio": ref_audio_b64,
+                }
+                if ref_text:
+                    payload["ref_text"] = ref_text
+                async with httpx.AsyncClient(timeout=120) as client:
+                    resp = await client.post(
+                        f"{p['base_url'].rstrip('/')}/audio/speech",
+                        json=payload,
+                    )
+                    resp.raise_for_status()
+                    audio_bytes = resp.content
+            else:
+                client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"])
+                resp = await client.audio.speech.create(
+                    model=p["model"],
+                    voice=voice_name or p.get("voice", "alloy"),
+                    input=text,
+                    response_format=fmt,
+                    speed=p.get("speed", 1.0),
+                )
+                audio_bytes = resp.content
+
             mime_map = {
                 "opus": "audio/ogg; codecs=opus",
                 "mp3": "audio/mpeg",

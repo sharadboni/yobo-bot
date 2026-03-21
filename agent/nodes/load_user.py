@@ -1,7 +1,8 @@
 """Load or create user profile. Handle admin approval flow."""
 from __future__ import annotations
 import logging
-from agent.services.user_store import load_user as _load, save_user as _save, jid_to_number
+from agent.services.user_store import load_user as _load, save_user as _save
+from agent.jid import jid_to_number
 
 log = logging.getLogger(__name__)
 
