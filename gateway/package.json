@@ -1,0 +1,17 @@
+{
+    "name": "whatsapp-gateway",
+    "version": "1.0.0",
+    "private": true, 
+    "type": "module",
+    "scripts": {
+        "start": "node src/index.js"
+    },
+    "dependencies": {
+        "@whiskeysockets/baileys": "^7.0.0-rc.9",
+        "dotenv": "^16.4.7",
+        "pino": "^9.6.0",
+        "qrcode-terminal": "^0.12.0",
+        "uuid": "^11.1.0",
+        "ws": "^8.18.0"
+    }
+}
