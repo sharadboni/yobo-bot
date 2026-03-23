@@ -59,6 +59,11 @@ async def handle_admin_command(send_fn, admin: AdminState, sender: str, text: st
             return True
         if approve_user(number):
             await send_fn({"type": "reply", "to": sender, "content": {"text": f"User {number} approved."}})
+            # Notify the approved user
+            user_jid = f"{number}@s.whatsapp.net"
+            await send_fn({"type": "reply", "to": user_jid, "content": {"text": (
+                "You've been approved! Send /help to see what I can do."
+            )}})
             if number == admin.last_pending_number:
                 admin.last_pending_number = ""
         else:

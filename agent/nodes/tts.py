@@ -8,7 +8,7 @@ the LLM's training, just post-process reliably.
 from __future__ import annotations
 import base64
 import logging
-from agent.services.llm import synthesize_speech
+from agent.services.llm import synthesize_dialogue, synthesize_speech
 from agent.services.voice_store import get_active_voice
 from agent.sanitize import sanitize_llm_output, strip_markdown
 
@@ -27,14 +27,25 @@ async def tts_node(state: dict) -> dict:
         return {}
     if intent.startswith("__"):
         return {}
-    if content_type != "audio" and intent != "podcast":
+    if content_type not in ("audio", "dialogue") and intent != "podcast":
         return {}
 
-    # Post-process for speech: sanitize → strip markdown → clean text
-    tts_text = sanitize_llm_output(reply, user_jid=user_jid)
-    tts_text = strip_markdown(tts_text)
-
     try:
+        # Dialogue mode: multi-voice synthesis
+        if content_type == "dialogue" and state.get("dialogue_segments"):
+            segments = state["dialogue_segments"]
+            log.info("TTS dialogue: user=%s segments=%d intent=%s", user_jid, len(segments), intent)
+            audio_bytes, mimetype = await synthesize_dialogue(segments)
+            return {
+                "reply_audio": base64.b64encode(audio_bytes).decode(),
+                "reply_audio_mimetype": mimetype,
+                "reply_text": reply,
+            }
+
+        # Single voice mode
+        tts_text = sanitize_llm_output(reply, user_jid=user_jid)
+        tts_text = strip_markdown(tts_text)
+
         voice = get_active_voice(user_jid)
         log.info("TTS: user=%s voice=%s cloned=%s chars=%d intent=%s",
                  user_jid, voice["name"], bool(voice["ref_audio_b64"]), len(tts_text), intent)
@@ -47,7 +58,7 @@ async def tts_node(state: dict) -> dict:
         return {
             "reply_audio": base64.b64encode(audio_bytes).decode(),
             "reply_audio_mimetype": mimetype,
-            "reply_text": reply,  # keep original markdown for text display
+            "reply_text": reply,
         }
     except Exception as e:
         log.warning("TTS failed, sending text only: %s", e)

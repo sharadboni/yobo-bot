@@ -55,8 +55,10 @@ async def voice_cmd(state: dict) -> dict:
             return {"reply_text": "Usage: /voice set <name>"}
         name = subargs
         if not set_active_voice(user_jid, name):
+            # Try matching with underscores/case stripped (WhatsApp often strips underscores)
+            normalized = name.lower().replace("_", "").replace(" ", "")
             for b in BUILTIN_VOICES:
-                if b.lower() == name.lower():
+                if b.lower().replace("_", "") == normalized:
                     name = b
                     break
             if not set_active_voice(user_jid, name):

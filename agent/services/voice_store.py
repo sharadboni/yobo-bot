@@ -14,7 +14,9 @@ VOICES_DIR = os.getenv("VOICES_DIR", "data/voices")
 BUILTIN_VOICES = [
     # American English
     "af_heart", "af_bella", "af_nova", "af_sky",
-    "am_adam", "am_echo", "am_eric", "am_liam",
+    "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam", "am_michael", "am_onyx", "am_puck",
+    # British English
+    "bf_alice", "bf_emma", "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
     # Spanish
     "ef_dora", "em_alex", "em_santa",
     # Hindi

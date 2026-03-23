@@ -20,7 +20,7 @@ setup-data:
 
 # Run foreground (for development / QR scan)
 gateway:
-	cd gateway && node src/index.js
+	node gateway/src/index.js
 
 agent:
 	.venv/bin/python -m agent.main
@@ -29,7 +29,7 @@ agent:
 start: stop setup-data
 	@mkdir -p $(LOGS_DIR)
 	@echo "Starting gateway..."
-	@nohup node gateway/src/index.js > $(LOGS_DIR)/gateway.log 2>&1 & echo $$! > $(LOGS_DIR)/gateway.pid
+	@nohup $(HOME)/.nvm/versions/node/v24.14.0/bin/node gateway/src/index.js > $(LOGS_DIR)/gateway.log 2>&1 & echo $$! > $(LOGS_DIR)/gateway.pid
 	@echo "Gateway started (PID $$(cat $(LOGS_DIR)/gateway.pid)), logs: $(LOGS_DIR)/gateway.log"
 	@sleep 2
 	@echo "Starting agent..."
@@ -50,7 +50,9 @@ stop:
 		kill $$(cat $(LOGS_DIR)/agent.pid) 2>/dev/null && echo "Agent stopped (pid)" || true; \
 		rm -f $(LOGS_DIR)/agent.pid; \
 	fi
-	@# Also kill any orphan node gateway on the WS port
+	@# Kill any orphan processes
+	@-pgrep -f 'python.*agent\.main' | xargs -r kill 2>/dev/null
+	@-pgrep -f 'node.*gateway/src/index' | xargs -r kill 2>/dev/null
 	@-lsof -t -i:8765 2>/dev/null | xargs -r kill 2>/dev/null
 	@sleep 1
 

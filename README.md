@@ -17,7 +17,7 @@ WhatsApp <-> Gateway (Node.js/Baileys) <-> WebSocket :8765 <-> Agent (Python/Lan
 - **Web search fallback** — DuckDuckGo -> Tavily -> Bing (scrape) -> Serper (Google) -> Yahoo (scrape)
 - **News search** — Google News RSS -> Reuters -> BBC -> AP (free, unlimited)
 - **Wikipedia** — factual lookups via Wikipedia REST API
-- **Podcast generation** — `/podcast <topic>` researches and generates a voice-note podcast
+- **Podcast generation** — `/podcast <topic>` researches and generates a voice-note podcast (single or two-voice dialogue)
 - **Task scheduler** — users schedule recurring news/search/podcast deliveries
 - **Concurrent messaging** — send multiple messages without waiting, all process in parallel
 - **Typing indicator** — shows "typing..." while processing, stays active during long operations
@@ -234,13 +234,14 @@ The LLM can automatically call these tools during conversation:
 | `/search <query>` | Search the web and summarize |
 | `/s <query>` | Search shortcut |
 | `/podcast <topic>` | Generate a podcast voice note |
+| `/podcast <topic> --dialogue` | Two-voice podcast conversation |
 | `/p <topic>` | Podcast shortcut |
 | `/schedule <type> <freq> [day] <time> [--audio] <topic>` | Schedule a recurring task |
 | `/schedules` | List your scheduled tasks |
 | `/unschedule <id>` | Remove a scheduled task |
 | `/voice` | Show current voice and usage |
 | `/voice list` | List all available voices |
-| `/voice set <name>` | Switch TTS voice |
+| `/voice set <name>` | Switch TTS voice (underscores optional: `afheart` = `af_heart`) |
 | `/voice add <name> [transcript]` | Add a custom voice (then send audio) |
 | `/voice remove <name>` | Remove a custom voice |
 | `/help` | Show available commands |
@@ -251,6 +252,20 @@ The LLM can automatically call these tools during conversation:
 /schedule podcast daily 8am --audio tech news
 /schedule search weekly monday 9am weather forecast
 ```
+
+### Two-voice podcast
+```
+# Single voice (default)
+/podcast AI breakthroughs
+
+# Two-voice dialogue — uses your active voice as HOST, picks a contrasting voice for GUEST
+/podcast AI breakthroughs --dialogue
+
+# Also works with the shortcut
+/p AI breakthroughs --duo
+```
+
+The dialogue mode generates a natural HOST/GUEST conversation. HOST uses your active voice (including cloned voices), GUEST automatically picks a contrasting builtin voice (male if you have female, and vice versa).
 
 ### Voice cloning
 ```

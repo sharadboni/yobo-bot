@@ -27,4 +27,5 @@ class AgentState(TypedDict):
     reply_text: str           # text to send back
     reply_audio: str          # base64-encoded audio (TTS)
     reply_audio_mimetype: str # mimetype of reply audio
+    dialogue_segments: list[dict]  # multi-voice TTS segments [{voice, text}, ...]
     outbound: list[dict]      # messages to send via WS

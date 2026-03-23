@@ -321,3 +321,45 @@ async def synthesize_speech(
             log.warning("[tts] %s failed: %s", p["name"], e)
             last_err = e
     raise RuntimeError(f"All TTS providers failed. Last: {last_err}")
+
+
+async def synthesize_dialogue(
+    segments: list[dict],
+    pause_ms: int = 500,
+) -> tuple[bytes, str]:
+    """Multi-voice dialogue synthesis via /v1/audio/dialogue.
+
+    Each segment: {"voice": "af_heart", "text": "Hello!"}
+    Optionally include ref_audio/ref_text for voice cloning segments.
+    Returns (audio_bytes, mimetype).
+    """
+    last_err = None
+    for p in _get_providers("tts"):
+        try:
+            fmt = p.get("response_format", "opus")
+            payload = {
+                "segments": segments,
+                "speed": p.get("speed", 1.0),
+                "response_format": fmt,
+                "pause_ms": pause_ms,
+            }
+            async with httpx.AsyncClient(timeout=600) as client:
+                resp = await client.post(
+                    f"{p['base_url'].rstrip('/')}/audio/dialogue",
+                    json=payload,
+                )
+                resp.raise_for_status()
+                audio_bytes = resp.content
+
+            mime_map = {
+                "opus": "audio/ogg; codecs=opus",
+                "mp3": "audio/mpeg",
+                "aac": "audio/aac",
+                "flac": "audio/flac",
+                "wav": "audio/wav",
+            }
+            return audio_bytes, mime_map.get(fmt, "audio/ogg")
+        except Exception as e:
+            log.warning("[dialogue] %s failed: %s", p["name"], e)
+            last_err = e
+    raise RuntimeError(f"All TTS providers failed for dialogue. Last: {last_err}")

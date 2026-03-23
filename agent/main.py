@@ -71,6 +71,7 @@ async def handle_message(send_fn, payload: dict):
             "reply_text": "",
             "reply_audio": "",
             "reply_audio_mimetype": "",
+            "dialogue_segments": [],
             "outbound": [],
         })
     finally:

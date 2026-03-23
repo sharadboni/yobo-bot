@@ -21,12 +21,13 @@ class UserProfile(TypedDict):
 
 
 def new_profile(jid: str, push_name: str = "") -> UserProfile:
+    now = time.time()
     return {
         "jid": jid,
         "push_name": push_name,
         "approved": False,
         "ignored": False,
-        "created_at": time.time(),
-        "last_seen": time.time(),
+        "created_at": now,
+        "last_seen": now,
         "history": [],
     }
