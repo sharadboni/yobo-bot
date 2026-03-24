@@ -30,41 +30,41 @@ async def execute_skill_node(state: dict) -> dict:
     if intent == "help":
         return {
             "reply_text": (
-                "I'm your AI assistant on WhatsApp. You can chat with me, send voice notes, images, or documents and I'll understand them. Here's everything I can do:\n\n"
-                "*Chat & Search*\n"
-                "/search <query> — Search the web\n"
-                "/s <query> — Search shortcut\n"
-                "Example: /search weather in Boston today\n\n"
-                "*Podcast*\n"
-                "/podcast <topic> — Generate a podcast voice note\n"
-                "/podcast <topic> --dialogue — Two-voice podcast\n"
-                "/p <topic> — Podcast shortcut\n"
-                "Example: /podcast AI breakthroughs --dialogue\n\n"
-                "*Scheduling*\n"
-                "/schedule <type> <freq> [day] <time> [--audio] <topic>\n"
-                "/schedules — List your scheduled tasks\n"
-                "/unschedule <id> — Remove a scheduled task\n"
-                "Examples:\n"
-                "  /schedule news daily 8am AI technology\n"
-                "  /schedule podcast weekly monday 9am tech news --audio\n\n"
-                "*Voice*\n"
-                "/voice — Show current voice\n"
-                "/voice list — List all voices\n"
-                "/voice set <name> — Switch voice\n"
-                "/voice add <name> <transcript> — Clone a voice\n"
-                "/voice remove <name> — Remove a voice\n"
-                "Examples:\n"
-                "  /voice set af bella\n"
-                "  /voice add myvoice Hello this is my voice\n"
-                "  (then send a voice note saying that)\n\n"
+                "Hey! I'm Yobo, your AI assistant. Here's what I can do:\n\n"
+
+                "Just chat with me naturally — I can answer questions, search the web, look up news, and more. "
+                "You can also send me voice notes, photos, or documents and I'll understand them.\n\n"
+
+                "---\n\n"
+
+                "*Web Search*\n"
+                "/search weather in Boston\n"
+                "/s latest iPhone price\n\n"
+
+                "*Podcasts*\n"
+                "/podcast AI breakthroughs\n"
+                "/podcast space exploration --dialogue\n"
+                "The --dialogue flag creates a two-voice conversation!\n\n"
+
+                "*Scheduled Updates*\n"
+                "/schedule news daily 8am AI technology\n"
+                "/schedule podcast weekly monday 9am tech --audio\n"
+                "/schedules to see yours, /unschedule <id> to remove\n\n"
+
+                "*Voice & TTS*\n"
+                "/voice list — browse 50+ voices\n"
+                "/voice set af bella — change your voice\n"
+                "/voice add myvoice Hello this is my voice\n"
+                "Then send a voice note to clone your voice!\n\n"
+
                 "*Documents*\n"
-                "Send a PDF or text file with a caption to process it.\n"
-                "Examples:\n"
-                "  Send a PDF with caption: Summarize this\n"
-                "  Send a CSV with caption: What are the top 5 entries?\n"
-                "Supported: PDF, TXT, CSV, HTML, Markdown, JSON\n\n"
-                "/help — Show this message\n\n"
-                "Or just send a message to chat! I can also understand voice notes and images."
+                "Send any PDF, TXT, CSV, or JSON file.\n"
+                "Add a caption like \"Summarize this\" or \"Find the key takeaways\"\n\n"
+
+                "---\n\n"
+
+                "Tip: Send me a photo with a caption to ask about it, "
+                "or just say hi to get started!"
             )
         }
 
