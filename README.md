@@ -2,6 +2,8 @@
 
 An AI-powered WhatsApp assistant that understands text, voice, images, and documents. Built with a two-tier architecture: a Node.js gateway for WhatsApp connectivity and a Python agent for AI logic.
 
+Pair with [mlx-omni-server](https://github.com/sharadboni/mlx-omni-server) to run TTS, STT, vision, and speech-to-speech models locally on Apple Silicon.
+
 ```
 WhatsApp <-> Gateway (Node.js/Baileys) <-> WebSocket :8765 <-> Agent (Python/LangGraph)
 ```
