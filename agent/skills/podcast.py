@@ -1,7 +1,7 @@
 """Podcast skill — research a topic and generate a voice-note podcast."""
 from __future__ import annotations
 import logging
-from agent.tools import news_search, web_search, read_page
+from agent.tools import news_search_aggregated, web_search, read_page
 from agent.services.llm import chat_completion
 from agent.services.voice_store import get_active_voice
 
@@ -51,12 +51,12 @@ Do not add any formatting — output ONLY the dialogue lines."""
 MAX_WORDS_MONO = 200
 MAX_WORDS_DIALOGUE = 300
 MAX_RETRIES = 2
-MAX_PAGES_TO_READ = 2
+MAX_PAGES_TO_READ = 3
 
 # Contrasting voice pairs: if user has a female voice, guest is male, and vice versa
 _CONTRAST_VOICES = {
     # American English
-    "af_heart": "am_michael", "af_bella": "am_fenrir", "af_nova": "am_puck", "af_sky": "am_michael",
+    "af_heart": "am_fenrir", "af_bella": "am_fenrir", "af_nova": "am_puck", "af_sky": "bm_george",
     "am_adam": "af_heart", "am_echo": "af_bella", "am_eric": "af_nova", "am_liam": "af_heart",
     "am_michael": "af_heart", "am_fenrir": "af_bella", "am_puck": "af_nova",
     # British English
@@ -67,7 +67,7 @@ _CONTRAST_VOICES = {
     # Hindi
     "hf_alpha": "hm_omega", "hf_beta": "hm_psi", "hm_omega": "hf_alpha", "hm_psi": "hf_beta",
 }
-_DEFAULT_GUEST = "am_michael"
+_DEFAULT_GUEST = "am_fenrir"
 
 
 def _pick_guest_voice(host_voice_name: str) -> str:
@@ -117,12 +117,9 @@ def _parse_dialogue(script: str, host_voice: dict, guest_voice: str) -> list[dic
 async def _research(topic: str) -> str | None:
     """Search and read pages for a topic. Returns research text or None."""
     log.info("[podcast] Searching for: %s", topic)
-    search_results = await news_search(topic)
+    search_results = await news_search_aggregated(topic)
 
     if not search_results or search_results.startswith("All search providers failed"):
-        search_results = await web_search(topic)
-
-    if search_results.startswith("All search providers failed"):
         return None
 
     urls = [line.strip() for line in search_results.split("\n") if line.strip().startswith("http")]

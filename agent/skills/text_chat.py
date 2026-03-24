@@ -10,13 +10,20 @@ log = logging.getLogger(__name__)
 CONTEXT_TURNS = min(20, MAX_HISTORY)
 
 _CLASSIFY_PROMPT = (
-    "You are a classifier. Given a user message, decide if answering it requires "
-    "searching the internet for CURRENT or REAL-TIME information (weather, news, "
-    "prices, live scores, recent events).\n\n"
-    "If the question can be answered from general knowledge (explanations, jokes, "
-    "math, coding, opinions, greetings), output: no\n"
-    "If it needs CURRENT data from the internet, output: yes\n\n"
-    "Output ONLY one word: yes or no"
+    "You are a classifier. You have access to the internet via web search, news search, "
+    "and Wikipedia tools. Given a user message, decide if answering it requires "
+    "looking up information.\n\n"
+    "Output YES if the question is about:\n"
+    "- Current events, news, headlines, recent happenings\n"
+    "- Weather, prices, stocks, live scores, schedules\n"
+    "- Specific companies, products, funding rounds, releases\n"
+    "- Facts you're not 100% sure about\n"
+    "- Anything that needs up-to-date or verifiable data\n\n"
+    "Output NO if the question is:\n"
+    "- Greetings, small talk, opinions, jokes\n"
+    "- Math, coding help, explanations of well-known concepts\n"
+    "- Creative writing, translations, formatting requests\n\n"
+    "When in doubt, output YES. Output ONLY one word: yes or no"
 )
 
 

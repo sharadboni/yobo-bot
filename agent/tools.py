@@ -136,6 +136,16 @@ def _format_results(results: list[dict]) -> str:
     )
 
 
+def _format_news_results(results: list[dict]) -> str:
+    """Format news results with source attribution."""
+    if not results:
+        return ""
+    return "\n\n".join(
+        f"[{i+1}] [{r.get('source', 'Unknown')}] **{r['title']}**\n{r['body']}\n{r['url']}"
+        for i, r in enumerate(results)
+    )
+
+
 def _random_ua() -> str:
     return random.choice(_USER_AGENTS)
 
@@ -331,10 +341,21 @@ async def web_search(query: str) -> str:
 # --- News search via RSS feeds ---
 
 _RSS_FEEDS = {
+    # Aggregator
     "google_news": "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en",
+    # Wire services (neutral, factual)
     "reuters": "https://news.google.com/rss/search?q={query}+site:reuters.com&hl=en-US&gl=US&ceid=US:en",
-    "bbc": "https://news.google.com/rss/search?q={query}+site:bbc.com&hl=en-US&gl=US&ceid=US:en",
     "ap": "https://news.google.com/rss/search?q={query}+site:apnews.com&hl=en-US&gl=US&ceid=US:en",
+    # International perspectives
+    "bbc": "https://news.google.com/rss/search?q={query}+site:bbc.com&hl=en-US&gl=US&ceid=US:en",
+    "aljazeera": "https://news.google.com/rss/search?q={query}+site:aljazeera.com&hl=en-US&gl=US&ceid=US:en",
+    # US — varied editorial leanings
+    "npr": "https://news.google.com/rss/search?q={query}+site:npr.org&hl=en-US&gl=US&ceid=US:en",
+    "wsj": "https://news.google.com/rss/search?q={query}+site:wsj.com&hl=en-US&gl=US&ceid=US:en",
+    # Tech
+    "ars": "https://news.google.com/rss/search?q={query}+site:arstechnica.com&hl=en-US&gl=US&ceid=US:en",
+    # India
+    "ndtv": "https://news.google.com/rss/search?q={query}+site:ndtv.com&hl=en-IN&gl=IN&ceid=IN:en",
 }
 
 
@@ -379,31 +400,97 @@ async def _news_source_rss(query: str, source: str) -> list[dict]:
     return _parse_rss(resp.text, SEARCH_MAX_RESULTS)
 
 
+async def _news_hackernews(query: str) -> list[dict]:
+    """Fetch news from Hacker News via Algolia search API."""
+    url = f"https://hn.algolia.com/api/v1/search?query={quote_plus(query)}&tags=story&hitsPerPage={SEARCH_MAX_RESULTS}"
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+    data = resp.json()
+    results = []
+    for hit in data.get("hits", []):
+        title = hit.get("title", "").strip()
+        link = hit.get("url") or f"https://news.ycombinator.com/item?id={hit.get('objectID', '')}"
+        points = hit.get("points", 0)
+        comments = hit.get("num_comments", 0)
+        created = hit.get("created_at", "")
+        if not title:
+            continue
+        body = f"{points} points, {comments} comments ({created[:10]})" if created else f"{points} points, {comments} comments"
+        results.append({"title": title, "body": body, "url": link})
+    return results
+
+
 async def news_search(query: str) -> str:
-    """Search for news via RSS feeds with fallback. Output is sanitized."""
-    # Try Google News RSS first (aggregates all sources)
-    try:
-        results = await _news_google_rss(query)
-        if results:
-            log.info("[news] google_news returned %d results", len(results))
-            raw = _format_results(results)
-            return sanitize_tool_output(raw, source="news_search")
-    except Exception as e:
-        log.warning("[news] google_news failed: %s", e)
+    """Aggregate news from all sources concurrently. Output is sanitized."""
+    return await news_search_aggregated(query)
 
-    # Try individual source feeds
-    for source in ("reuters", "bbc", "ap"):
+
+async def news_search_aggregated(query: str, max_per_source: int = 3) -> str:
+    """Aggregate news from multiple sources concurrently. For podcasts and deep research.
+
+    Fetches Google News, Hacker News, Reuters, BBC, and AP in parallel,
+    deduplicates by URL, and returns combined results.
+    """
+    import asyncio
+
+    _SOURCE_LABELS = {
+        "google_news": "Google News",
+        "hackernews": "Hacker News",
+        "reuters": "Reuters",
+        "ap": "AP News",
+        "bbc": "BBC",
+        "aljazeera": "Al Jazeera",
+        "npr": "NPR",
+        "wsj": "Wall Street Journal",
+        "ars": "Ars Technica",
+        "ndtv": "NDTV",
+    }
+
+    async def _safe_fetch(name, coro):
         try:
-            results = await _news_source_rss(query, source)
+            results = await coro
             if results:
-                log.info("[news] %s returned %d results", source, len(results))
-                raw = _format_results(results)
-                return sanitize_tool_output(raw, source="news_search")
+                log.info("[news-agg] %s returned %d results", name, len(results))
+                # Tag each result with its source
+                for r in results:
+                    r["source"] = _SOURCE_LABELS.get(name, name)
+            return results or []
         except Exception as e:
-            log.warning("[news] %s failed: %s", source, e)
+            log.warning("[news-agg] %s failed: %s", name, e)
+            return []
 
-    # Fall back to regular web search with news keywords
-    return await web_search(f"{query} latest news")
+    # Fetch all sources concurrently
+    all_results = await asyncio.gather(
+        _safe_fetch("google_news", _news_google_rss(query)),
+        _safe_fetch("hackernews", _news_hackernews(query)),
+        _safe_fetch("reuters", _news_source_rss(query, "reuters")),
+        _safe_fetch("ap", _news_source_rss(query, "ap")),
+        _safe_fetch("bbc", _news_source_rss(query, "bbc")),
+        _safe_fetch("aljazeera", _news_source_rss(query, "aljazeera")),
+        _safe_fetch("npr", _news_source_rss(query, "npr")),
+        _safe_fetch("wsj", _news_source_rss(query, "wsj")),
+        _safe_fetch("ars", _news_source_rss(query, "ars")),
+        _safe_fetch("ndtv", _news_source_rss(query, "ndtv")),
+    )
+
+    # Take top N from each source, deduplicate by URL
+    seen_urls = set()
+    combined = []
+    for source_results in all_results:
+        for r in source_results[:max_per_source]:
+            url = r.get("url", "")
+            if url not in seen_urls:
+                seen_urls.add(url)
+                combined.append(r)
+
+    if not combined:
+        return await web_search(f"{query} latest news")
+
+    log.info("[news-agg] Combined %d unique results from %d sources",
+             len(combined), sum(1 for r in all_results if r))
+    raw = _format_news_results(combined)
+    return sanitize_tool_output(raw, source="news_search_aggregated")
 
 
 async def wikipedia(query: str) -> str:
