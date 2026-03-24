@@ -1,314 +1,132 @@
 # Yobo Bot
 
-Two-tier WhatsApp AI chatbot. A Node.js gateway handles WhatsApp connectivity via Baileys, a Python agent handles all AI logic via LangGraph. They communicate over WebSocket.
+An AI-powered WhatsApp assistant that understands text, voice, images, and documents. Built with a two-tier architecture: a Node.js gateway for WhatsApp connectivity and a Python agent for AI logic.
 
 ```
 WhatsApp <-> Gateway (Node.js/Baileys) <-> WebSocket :8765 <-> Agent (Python/LangGraph)
 ```
 
-## Features
+## What It Can Do
 
-- **Admin approval** — new users must be approved via self-chat (`/add`, `/ignore`)
-- **Multi-modal input** — text, voice notes (STT), images (vision), documents (PDF, text, CSV, etc.)
-- **Voice replies** — dual-model TTS: Kokoro (sub-second) for preset voices, Qwen3-TTS 1.7B for cloning
-- **Voice cloning** — users can clone voices from a 3-second audio sample
-- **LLM fallback** — configurable provider chain with per-capability endpoints
-- **Tool calling** — LLM auto-searches the web when needed (`web_search` + `read_page`)
-- **Web search fallback** — DuckDuckGo -> Tavily -> Bing (scrape) -> Serper (Google) -> Yahoo (scrape)
-- **News search** — Google News RSS -> Reuters -> BBC -> AP (free, unlimited)
-- **Wikipedia** — factual lookups via Wikipedia REST API
-- **Podcast generation** — `/podcast <topic>` researches and generates a voice-note podcast (single or two-voice dialogue)
-- **Task scheduler** — users schedule recurring news/search/podcast deliveries
-- **Concurrent messaging** — send multiple messages without waiting, all process in parallel
-- **Typing indicator** — shows "typing..." while processing, stays active during long operations
-- **Prompt injection defenses** — input/output sanitization, URL validation, exfiltration blocking
-- **Per-user data isolation** — separate profile, schedule, and voice files per user
+| Capability | How It Works |
+|---|---|
+| **Chat** | Send any message — the bot searches the web, looks up news, or answers from knowledge as needed |
+| **Voice notes** | Send a voice note and get a voice reply back (speech-to-speech) |
+| **Images** | Send a photo with a caption like "What is this?" |
+| **Documents** | Send a PDF, CSV, or text file with a caption like "Summarize this" |
+| **Podcasts** | `/podcast <topic>` generates a researched voice-note podcast |
+| **Two-voice podcasts** | `/podcast <topic> --dialogue` creates a HOST/GUEST conversation |
+| **Scheduled updates** | `/schedule news daily 8am AI technology` delivers recurring digests |
+| **Voice cloning** | Clone your own voice from a 3-second sample for TTS replies |
+| **50+ voice presets** | Switch between voices with `/voice set af_bella` |
+| **Web search** | `/search <query>` or just ask — the bot decides when to search |
+| **News aggregation** | Pulls from 10 sources: Google News, Hacker News, Reuters, AP, BBC, Al Jazeera, NPR, WSJ, Ars Technica, NDTV |
 
-## Architecture
-
-```
-yobo-bot/
-├── gateway/                       # Node.js WhatsApp gateway
-│   └── src/
-│       ├── index.js               # Entry point, wires WS bridge <-> WhatsApp
-│       ├── config.js              # Environment config
-│       ├── ws-bridge.js           # WebSocket server
-│       └── whatsapp.js            # Baileys connection, QR auth, media download
-├── agent/                         # Python AI agent
-│   ├── main.py                    # WS client, message dispatch, scheduler bootstrap
-│   ├── admin.py                   # Admin command handling (/add, /ignore, /clear)
-│   ├── config.py                  # Environment + LLM config loader
-│   ├── graph.py                   # LangGraph pipeline definition
-│   ├── state.py                   # Pipeline state schema (TypedDict)
-│   ├── models.py                  # User profile model (TypedDict)
-│   ├── jid.py                     # JID utility functions (single source of truth)
-│   ├── sanitize.py                # Prompt injection + exfiltration defenses
-│   ├── tools.py                   # LLM tools (web_search, read_page) + Playwright
-│   ├── nodes/                     # Pipeline nodes
-│   │   ├── load_user.py           # Load/create profile, admin approval gate
-│   │   ├── resolve_input.py       # text passthrough, audio->STT, image->vision, voice clone
-│   │   ├── classify_intent.py     # Slash commands -> skill routing
-│   │   ├── execute_skill.py       # Run matched skill
-│   │   ├── tts.py                 # Text-to-speech with user voice preferences
-│   │   └── save_user.py           # Append history, trim, save with file lock
-│   ├── skills/                    # User-facing skills
-│   │   ├── text_chat.py           # Conversational AI with tool calling
-│   │   ├── web_search.py          # Explicit /search command
-│   │   ├── podcast.py             # Research + generate podcast voice note
-│   │   ├── schedule.py            # Recurring task scheduling
-│   │   └── voice.py               # Voice management (set, add, remove, list)
-│   └── services/                  # Backend services
-│       ├── llm.py                 # LLM with fallback + tool calling loop
-│       ├── user_store.py          # File-based user profiles with locking
-│       ├── voice_store.py         # Per-user voice sample storage
-│       ├── scheduler.py           # Cron-like background task runner
-│       └── task_handlers.py       # Scheduler task executors (news, search, podcast)
-└── data/                          # Runtime data (gitignored)
-    ├── users/                     # User profiles (JSON per number)
-    ├── schedules/                 # Per-user schedule files
-    ├── voices/                    # Per-user voice samples for cloning
-    └── auth/                      # Baileys auth state
-```
-
-## LangGraph Pipeline
-
-```
-load_user -> resolve_input -> classify_intent -> execute_skill -> tts -> save_user
-    |             |                  |
-    |             |                  ├── /search   -> web_search skill
-    |             |                  ├── /podcast  -> podcast skill
-    |             |                  ├── /schedule -> scheduler skill
-    |             |                  ├── /voice    -> voice management skill
-    |             |                  └── (default) -> text_chat (with tool calling)
-    |             |
-    |             └── voice clone pending? -> save voice -> skip to save_user
-    |
-    └── new/ignored user? -> skip to save_user
-```
-
-## Setup
+## Quick Start
 
 ```bash
-# 1. Clone and enter
-cd yobo-bot
-
-# 2. Copy config templates
+# 1. Copy config templates
 cp .env.example .env
 cp agent/llm_config.yaml.example agent/llm_config.yaml
 
-# 3. Edit .env and agent/llm_config.yaml with your API keys and LAN endpoints
+# 2. Edit both files with your LLM endpoints
 
-# 4. Install everything
+# 3. Install everything
 make setup
 
-# 5. First run — foreground (to scan QR code)
-# Terminal 1:
-make gateway
-# Terminal 2:
-make agent
+# 4. First run (scan QR code)
+make gateway    # Terminal 1
+make agent      # Terminal 2
+
+# 5. After QR scan, run in background
+make start
 ```
 
 ## Running
 
-```bash
-# Foreground (for development / QR scan)
-make gateway          # Terminal 1
-make agent            # Terminal 2
-
-# Background
-make start            # Start both, logs in logs/
-make stop             # Stop both
-make status           # Check if running
-make logs-gateway     # Tail gateway logs
-make logs-agent       # Tail agent logs
-```
-
-## Smart Routing
-
-Messages are automatically routed to the right model:
-
-```
-User message
-  |
-  v
-Classifier (4B, 1 token, ~1s) — "Does this need external data?"
-  |
-  ├── No  → Fast model (4B, no_think, max 512 tokens, ~5s)
-  |
-  └── Yes → Tool model (9B, thinking ON, web_search/news/wiki, ~10-30s)
-```
-
-This keeps simple conversations fast while complex queries that need web search, news, or Wikipedia get the full tool-calling model with reasoning.
-
-### Thinking mode
-
-The `no_think` trick prefills an empty `<think></think>` block as an assistant message, making Qwen3 skip reasoning and respond directly. This halves response time for simple tasks.
-
-| Path | Model | Thinking | Why |
-|---|---|---|---|
-| Classifier | 4B | OFF | Just needs "yes" or "no" |
-| Simple chat | 4B | OFF | Fast conversational replies |
-| Tool calling | 9B | ON | Needs to reason about which tools to use and synthesize results |
-| /search summary | 9B | OFF | Data already fetched, just summarize |
-| /podcast script | 9B | OFF | Creative output, no reasoning needed |
-| Scheduler handlers | 9B | OFF | Summaries from pre-fetched data |
-
-## WhatsApp Formatting
-
-All LLM output is stripped of markdown before sending — plain text only. The system prompt instructs the LLM to avoid formatting, and a post-processor (`markdown_to_whatsapp`) catches any remaining markdown:
-
-- `**bold**` / `*italic*` -> plain text
-- `## Headers` -> plain text
-- `[links](url)` -> text (url)
-- Bullet points -> plain text
-- Code blocks -> removed
-
-## Connection Resilience
-
-- Agent uses WebSocket ping/pong (20s interval, 10s timeout) to detect dead connections
-- Gateway retries failed WhatsApp sends up to 3 times with 5s delay (handles connection drops)
-- `make restart` cleanly stops all processes before starting new ones
-- `make stop` kills by PID file + orphan cleanup on port 8765
-
-## LLM Configuration
-
-Edit `agent/llm_config.yaml` to configure endpoints per capability. Each has a fallback chain — providers are tried in order.
-
-```yaml
-text:                                  # For tool calling (web search, news, wiki)
-  - name: local-llm
-    base_url: http://YOUR_LAN_IP:52415/v1
-    api_key: "no-key"
-    model: mlx-community/Qwen3.5-9B-8bit
-    max_tokens: 32000
-    temperature: 0.5
-
-text_fast:                             # For simple chat (no tools needed)
-  - name: local-fast
-    base_url: http://YOUR_LAN_IP:52415/v1
-    api_key: "no-key"
-    model: mlx-community/Qwen3.5-4B-4bit
-    max_tokens: 256
-    temperature: 0.5
-
-vision:
-  - name: mlx-omni
-    type: mlx_omni                    # custom /v1/vision endpoint
-    base_url: http://YOUR_LAN_IP:8765/v1
-    model: mlx-community/Qwen2.5-VL-3B-Instruct-8bit
-
-stt:
-  - name: mlx-omni
-    base_url: http://YOUR_LAN_IP:8765/v1
-    model: mlx-community/Qwen3-ASR-0.6B-8bit
-
-tts:
-  - name: mlx-omni
-    base_url: http://YOUR_LAN_IP:8765/v1
-    model: mlx-community/Kokoro-82M-bf16
-    voice: af_heart              # Kokoro: af_heart, af_bella, am_adam, bf_alice, etc.
-    response_format: opus       # requires ffmpeg on the server
-# Voice cloning automatically uses Qwen3-TTS-1.7B when user has a custom voice
-```
-
-Use `${ENV_VAR}` in YAML values to reference `.env` variables (e.g., `api_key: ${OPENAI_API_KEY}`).
-
-## LLM Tools
-
-The LLM can automatically call these tools during conversation:
-
-| Tool | Use case | Sources |
-|---|---|---|
-| `web_search` | General queries (weather, prices, facts) | DuckDuckGo -> Tavily -> Bing (scrape) -> Serper (Google) -> Yahoo (scrape) |
-| `news_search` | News, headlines, current events | Google News RSS -> Reuters RSS -> BBC RSS -> AP RSS -> fallback to web_search |
-| `wikipedia` | Facts, people, places, history, science | Wikipedia REST API (free, unlimited) |
-| `read_page` | Deep dive into a specific URL | Playwright headless browser |
-
-**Search fallback chain**: if one provider fails or rate-limits, the next is tried automatically. API-based providers (Tavily, Serper) require keys in `.env`. Scrape-based providers (Bing, Yahoo) use headless Chromium with rotating user agents.
+| Command | Description |
+|---|---|
+| `make gateway` | Run gateway in foreground (for QR scan) |
+| `make agent` | Run agent in foreground |
+| `make start` | Start both in background |
+| `make stop` | Stop both (kills orphan processes too) |
+| `make restart` | Restart both |
+| `make status` | Check if running |
+| `make logs-gateway` | Tail gateway logs |
+| `make logs-agent` | Tail agent logs |
 
 ## Commands
 
-### User commands
+### Chat & Search
+
+| Command | Example |
+|---|---|
+| `/search <query>` | `/search weather in Boston today` |
+| `/s <query>` | `/s latest iPhone price` |
+
+Or just ask naturally — the bot automatically searches when needed.
+
+### Podcasts
+
+| Command | Example |
+|---|---|
+| `/podcast <topic>` | `/podcast AI breakthroughs` |
+| `/podcast <topic> --dialogue` | `/podcast space exploration --dialogue` |
+| `/p <topic>` | `/p tech news --duo` |
+
+The `--dialogue` / `--duo` flag creates a two-voice conversation. HOST uses your active voice, GUEST is automatically picked as a contrasting voice.
+
+### Documents
+
+Send any file with a caption — the caption is your instruction.
+
+| File type | Caption example |
+|---|---|
+| PDF | "Summarize this" |
+| CSV | "What are the top 5 entries?" |
+| JSON | "Review this config for issues" |
+| TXT, HTML, Markdown, XML | "Extract the key points" |
+
+No caption defaults to "Summarize this document."
+
+### Scheduling
+
+```
+/schedule news daily 8am AI technology
+/schedule podcast weekly monday 9am tech news --audio
+/schedule search daily 6pm weather forecast
+```
+
 | Command | Description |
 |---|---|
-| `/search <query>` | Search the web and summarize |
-| `/s <query>` | Search shortcut |
-| `/podcast <topic>` | Generate a podcast voice note |
-| `/podcast <topic> --dialogue` | Two-voice podcast conversation |
-| `/p <topic>` | Podcast shortcut |
-| `/schedule <type> <freq> [day] <time> [--audio] <topic>` | Schedule a recurring task |
 | `/schedules` | List your scheduled tasks |
-| `/unschedule <id>` | Remove a scheduled task |
-| `/voice` | Show current voice and usage |
-| `/voice list` | List all available voices |
-| `/voice set <name>` | Switch TTS voice (underscores optional: `afheart` = `af_heart`) |
-| `/voice add <name> [transcript]` | Add a custom voice (then send audio) |
+| `/unschedule <id>` | Remove a task |
+
+### Voice
+
+| Command | Description |
+|---|---|
+| `/voice` | Show your current voice |
+| `/voice list` | Browse 50+ voices |
+| `/voice set <name>` | Switch voice (underscores optional: `afheart` = `af_heart`) |
+| `/voice add <name> <transcript>` | Clone a voice — then send a voice note |
 | `/voice remove <name>` | Remove a custom voice |
-| Send a document with caption | Process PDF, TXT, CSV, HTML, Markdown, JSON files |
-| `/help` | Show available commands |
 
-### Schedule examples
+**Voice cloning example:**
 ```
-/schedule news daily 4pm AI technology
-/schedule podcast daily 8am --audio tech news
-/schedule search weekly monday 9am weather forecast
-```
-
-### Two-voice podcast
-```
-# Single voice (default)
-/podcast AI breakthroughs
-
-# Two-voice dialogue — uses your active voice as HOST, picks a contrasting voice for GUEST
-/podcast AI breakthroughs --dialogue
-
-# Also works with the shortcut
-/p AI breakthroughs --duo
-```
-
-The dialogue mode generates a natural HOST/GUEST conversation. HOST uses your active voice (including cloned voices), GUEST automatically picks a contrasting builtin voice (male if you have female, and vice versa).
-
-### Document processing
-```
-# Send a PDF with a caption — the caption is your instruction
-Caption: Summarize this
-Caption: What are the key findings?
-Caption: Extract all dates and amounts
-
-# Works with text-based files too
-Caption: Analyze this CSV data
-Caption: Review this JSON config for issues
-
-# If no caption is provided, defaults to "Summarize this document."
-```
-
-Supported formats: PDF, plain text, CSV, HTML, Markdown, JSON, XML. Documents are sanitized for prompt injection before processing. Large documents (>20k characters) are truncated.
-
-### Voice cloning
-```
-# Step 1: Start adding a voice with the transcript of what you'll say
 /voice add myvoice Hello, this is what my voice sounds like
-
-# Step 2: Send a voice note saying exactly that
-
-# The bot saves your voice and uses it for all future TTS replies
-# (uses Qwen3-TTS 1.7B for cloning — higher quality, slower)
-
-# Switch back to a built-in Kokoro voice (sub-second, consistent)
-/voice set af_heart
+# Then send a voice note saying exactly that
+# Bot saves it and uses it for all future replies
 ```
+
+**Built-in voices:** American (`af_heart`, `af_bella`, `af_nova`, `af_sky`, `am_adam`, `am_echo`, `am_fenrir`, `am_michael`, `am_puck`), British (`bf_alice`, `bf_emma`, `bm_fable`, `bm_george`), Spanish, Hindi, and more.
 
 **Dual-model TTS:**
-- **Kokoro 82M** (default) — sub-second latency, 54 preset voices, consistent output
-- **Qwen3-TTS 1.7B** (automatic for cloned voices) — better quality voice cloning from 3-10s samples
-- The server picks the right model automatically based on whether a custom voice is active
-- Including a transcript when adding a voice (`/voice add name <transcript>`) improves cloning quality
+- **Kokoro 82M** — sub-second, 50+ preset voices (default)
+- **Qwen3-TTS 1.7B** — higher quality voice cloning from 3-10s samples (automatic when a custom voice is active)
 
-**Kokoro voice presets:**
-- American: `af_heart`, `af_bella`, `af_nova`, `af_sky`, `am_adam`, `am_echo`, `am_eric`, `am_liam`
-- British: `bf_alice`, `bf_emma`, `bm_daniel`, `bm_george`
+### Admin Commands (self-chat only)
 
-### Admin commands (self-chat only)
 | Command | Description |
 |---|---|
 | `/add <number>` | Approve a user |
@@ -317,15 +135,156 @@ Supported formats: PDF, plain text, CSV, HTML, Markdown, JSON, XML. Documents ar
 | `/clear` | Clear all WhatsApp chats |
 | `/clear <number>` | Clear a specific chat |
 
+New users are held in a pending state until approved. They receive a notification with `/help` when approved.
+
+## How It Works
+
+### Architecture
+
+```
+yobo-bot/
+├── gateway/                       # Node.js WhatsApp gateway
+│   └── src/
+│       ├── index.js               # Entry point, outbound message handling
+│       ├── whatsapp.js            # Baileys connection, QR auth, media download
+│       ├── ws-bridge.js           # WebSocket server (agent <-> gateway)
+│       └── config.js              # Environment config
+├── agent/                         # Python AI agent
+│   ├── main.py                    # WebSocket client, message dispatch
+│   ├── graph.py                   # LangGraph pipeline definition
+│   ├── config.py                  # System prompt, LLM config loader
+│   ├── sanitize.py                # Prompt injection defenses
+│   ├── tools.py                   # Web search, news, Wikipedia, Playwright
+│   ├── nodes/                     # Pipeline stages
+│   │   ├── load_user.py           # Profile loading, admin approval gate
+│   │   ├── resolve_input.py       # Text/audio/image/document normalization
+│   │   ├── classify_intent.py     # Command routing
+│   │   ├── execute_skill.py       # Skill execution
+│   │   ├── tts.py                 # Text-to-speech generation
+│   │   └── save_user.py           # History management
+│   ├── skills/                    # User-facing capabilities
+│   │   ├── text_chat.py           # Smart routing + tool calling
+│   │   ├── web_search.py          # /search command
+│   │   ├── podcast.py             # Research + script + TTS
+│   │   ├── schedule.py            # Recurring tasks
+│   │   └── voice.py               # Voice management
+│   └── services/                  # Backend services
+│       ├── llm.py                 # LLM calls with fallback chains
+│       ├── user_store.py          # File-based profiles with locking
+│       ├── voice_store.py         # Voice sample storage
+│       ├── scheduler.py           # Background task scheduler
+│       └── task_handlers.py       # Scheduled task executors
+└── data/                          # Runtime data (gitignored)
+    ├── users/                     # Per-user profiles
+    ├── schedules/                 # Per-user schedule files
+    ├── voices/                    # Voice samples for cloning
+    └── auth/                      # Baileys WhatsApp session
+```
+
+### Pipeline
+
+Every incoming message flows through this LangGraph pipeline:
+
+```
+load_user -> resolve_input -> classify_intent -> execute_skill -> tts -> save_user
+```
+
+- **load_user** — loads profile, gates new/ignored users, notifies admin of new contacts
+- **resolve_input** — normalizes input: text passthrough, audio->STT, image->vision, document->text extraction
+- **classify_intent** — routes `/commands` to skills, everything else to `text_chat`
+- **execute_skill** — runs the matched skill
+- **tts** — generates voice reply if the input was audio or the skill requests it
+- **save_user** — appends to chat history, trims, saves
+
+### Smart Routing
+
+```
+User message
+  │
+  ▼
+Classifier (fast model, 1 token) — "Does this need a lookup?"
+  │
+  ├── No  → Fast model (direct reply, ~2-5s)
+  │
+  └── Yes → Tool-calling model (web search, news, Wikipedia, ~10-30s)
+```
+
+The classifier errs on the side of searching — company info, funding rounds, specific facts all trigger a lookup. Simple greetings, math, and coding questions skip straight to the fast model.
+
+Documents skip the classifier entirely and go to the full model for processing.
+
+### News Aggregation
+
+News queries fetch from 10 sources concurrently and deduplicate results:
+
+| Source | Type |
+|---|---|
+| Google News | General aggregator |
+| Hacker News | Tech community (via Algolia API) |
+| Reuters, AP | Wire services (neutral, factual) |
+| BBC, Al Jazeera | International perspectives |
+| NPR, WSJ | US varied editorial leanings |
+| Ars Technica | Tech, in-depth |
+| NDTV | India |
+
+Each result is tagged with its source so the LLM can synthesize across perspectives.
+
+### Connection Resilience
+
+- Gateway uses a mutable socket reference — reconnections automatically use the fresh connection
+- WhatsApp sends retry up to 3 times with 5s delay on connection drops
+- Agent WebSocket uses ping/pong (20s interval, 10s timeout)
+- `make stop` kills orphan processes via `pgrep` to prevent zombie accumulation
+
+## LLM Configuration
+
+Edit `agent/llm_config.yaml` to configure endpoints. Each capability has a fallback chain — providers are tried in order.
+
+```yaml
+text:                                  # Tool-calling model
+  - name: local-llm
+    base_url: http://YOUR_LAN_IP:52415/v1
+    model: mlx-community/Qwen3.5-9B-8bit
+    max_tokens: 32000
+    temperature: 0.5
+
+text_fast:                             # Fast chat model
+  - name: local-fast
+    base_url: http://YOUR_LAN_IP:52415/v1
+    model: mlx-community/Qwen3.5-4B-4bit
+    max_tokens: 256
+    temperature: 0.5
+
+vision:                                # Image analysis
+  - name: mlx-omni
+    type: mlx_omni
+    base_url: http://YOUR_LAN_IP:8765/v1
+    model: mlx-community/Qwen2.5-VL-3B-Instruct-8bit
+
+stt:                                   # Speech-to-text
+  - name: mlx-omni
+    base_url: http://YOUR_LAN_IP:8765/v1
+    model: mlx-community/Qwen3-ASR-0.6B-8bit
+
+tts:                                   # Text-to-speech
+  - name: mlx-omni
+    base_url: http://YOUR_LAN_IP:8765/v1
+    model: mlx-community/Kokoro-82M-bf16
+    voice: af_heart
+    response_format: opus
+```
+
+Use `${ENV_VAR}` in YAML values to reference `.env` variables.
+
 ## Security
 
 - **Input sanitization** — zero-width character stripping on all user messages
-- **Tool output sanitization** — injection pattern detection and redaction at the source (web_search, read_page)
-- **URL validation** — blocks SSRF (private networks) and exfiltration endpoints (webhook.site, ngrok, etc.)
-- **LLM output sanitization** — redacts leaked JIDs, file paths, and API keys before sending
-- **System prompt hardening** — explicit rules against data leaks, instruction override, and cross-user access
-- **Per-user data isolation** — separate files for profiles, schedules, and voice samples; path traversal protection on voice names
-- **Tool result wrapping** — clear boundary markers so the LLM distinguishes data from instructions
-- **Document sanitization** — uploaded PDFs and text files are sanitized before LLM processing
+- **Tool output sanitization** — injection pattern detection and redaction
+- **Document sanitization** — uploaded files are sanitized before LLM processing
+- **URL validation** — blocks SSRF (private networks) and exfiltration endpoints
+- **LLM output sanitization** — redacts leaked JIDs, file paths, and API keys
+- **System prompt hardening** — rules against data leaks, instruction override, cross-user access
+- **Per-user data isolation** — separate files per user with path traversal protection
+- **Tool result wrapping** — boundary markers so the LLM distinguishes data from instructions
 
-**Disclaimer:** These defenses reduce the risk of prompt injection but cannot eliminate it entirely. LLMs are inherently susceptible to adversarial inputs, and novel attack vectors are discovered regularly. Do not use this bot to process sensitive or confidential documents. Do not rely on it for security-critical decisions. Use at your own risk.
+> **Disclaimer:** These defenses reduce the risk of prompt injection but cannot eliminate it entirely. LLMs are inherently susceptible to adversarial inputs, and novel attack vectors are discovered regularly. Do not use this bot to process sensitive or confidential documents. Do not rely on it for security-critical decisions. Use at your own risk.
