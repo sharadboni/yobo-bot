@@ -326,3 +326,6 @@ Supported formats: PDF, plain text, CSV, HTML, Markdown, JSON, XML. Documents ar
 - **System prompt hardening** — explicit rules against data leaks, instruction override, and cross-user access
 - **Per-user data isolation** — separate files for profiles, schedules, and voice samples; path traversal protection on voice names
 - **Tool result wrapping** — clear boundary markers so the LLM distinguishes data from instructions
+- **Document sanitization** — uploaded PDFs and text files are sanitized before LLM processing
+
+**Disclaimer:** These defenses reduce the risk of prompt injection but cannot eliminate it entirely. LLMs are inherently susceptible to adversarial inputs, and novel attack vectors are discovered regularly. Do not use this bot to process sensitive or confidential documents. Do not rely on it for security-critical decisions. Use at your own risk.
