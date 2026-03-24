@@ -19,7 +19,12 @@ async function main() {
     log.info('Gateway started');
 
     // 2. Start WhatsApp connection
-    const wa = await startWhatsApp(bridge, log);
+    // wa is mutable — startWhatsApp updates it on reconnect
+    const waRef = { sock: null };
+    waRef.sock = await startWhatsApp(bridge, log, waRef);
+    const wa = new Proxy(waRef, {
+        get: (target, prop) => target.sock[prop],
+    });
 
     // Retry queue for failed sends
     const MAX_RETRIES = 3;

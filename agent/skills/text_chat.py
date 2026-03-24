@@ -1,7 +1,7 @@
 """Text chat skill - classify then route to fast model or tool-calling model."""
 from __future__ import annotations
 import logging
-from agent.services.llm import chat_completion_with_tools, chat_completion_fast
+from agent.services.llm import chat_completion, chat_completion_with_tools, chat_completion_fast
 from agent.config import SYSTEM_PROMPT, MAX_HISTORY
 from agent.tools import TOOLS, TOOL_EXECUTORS
 
@@ -48,6 +48,12 @@ async def text_chat(state: dict) -> dict:
     profile = state.get("user_profile", {})
     resolved = state.get("resolved_text", "")
     messages = build_llm_messages(profile, resolved)
+
+    # Document inputs: skip classifier, use big model with no_think for direct processing
+    if "[TOOL RESULT from document:" in resolved:
+        log.info("Routing document to text model (no tools): %s", resolved[:60])
+        reply = await chat_completion(messages, no_think=True)
+        return {"reply_text": reply}
 
     needs = await _needs_tools(resolved)
 

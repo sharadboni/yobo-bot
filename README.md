@@ -9,7 +9,7 @@ WhatsApp <-> Gateway (Node.js/Baileys) <-> WebSocket :8765 <-> Agent (Python/Lan
 ## Features
 
 - **Admin approval** — new users must be approved via self-chat (`/add`, `/ignore`)
-- **Multi-modal input** — text, voice notes (STT), images (vision)
+- **Multi-modal input** — text, voice notes (STT), images (vision), documents (PDF, text, CSV, etc.)
 - **Voice replies** — dual-model TTS: Kokoro (sub-second) for preset voices, Qwen3-TTS 1.7B for cloning
 - **Voice cloning** — users can clone voices from a 3-second audio sample
 - **LLM fallback** — configurable provider chain with per-capability endpoints
@@ -244,6 +244,7 @@ The LLM can automatically call these tools during conversation:
 | `/voice set <name>` | Switch TTS voice (underscores optional: `afheart` = `af_heart`) |
 | `/voice add <name> [transcript]` | Add a custom voice (then send audio) |
 | `/voice remove <name>` | Remove a custom voice |
+| Send a document with caption | Process PDF, TXT, CSV, HTML, Markdown, JSON files |
 | `/help` | Show available commands |
 
 ### Schedule examples
@@ -266,6 +267,22 @@ The LLM can automatically call these tools during conversation:
 ```
 
 The dialogue mode generates a natural HOST/GUEST conversation. HOST uses your active voice (including cloned voices), GUEST automatically picks a contrasting builtin voice (male if you have female, and vice versa).
+
+### Document processing
+```
+# Send a PDF with a caption — the caption is your instruction
+Caption: Summarize this
+Caption: What are the key findings?
+Caption: Extract all dates and amounts
+
+# Works with text-based files too
+Caption: Analyze this CSV data
+Caption: Review this JSON config for issues
+
+# If no caption is provided, defaults to "Summarize this document."
+```
+
+Supported formats: PDF, plain text, CSV, HTML, Markdown, JSON, XML. Documents are sanitized for prompt injection before processing. Large documents (>20k characters) are truncated.
 
 ### Voice cloning
 ```

@@ -21,7 +21,7 @@ function sameUser(jid1, jid2) {
     return jid1.split(':')[0].split('@')[0] === jid2.split(':')[0].split('@')[0];
 }
 
-export async function startWhatsApp(bridge, log) {
+export async function startWhatsApp(bridge, log, waRef = null) {
     const authDir = path.resolve(config.authDir);
     fs.mkdirSync(authDir, { recursive: true });
 
@@ -61,7 +61,9 @@ export async function startWhatsApp(bridge, log) {
             const code = lastDisconnect?.error?.output?.statusCode;
             if (code !== DisconnectReason.loggedOut) {
                 log.warn({ code }, 'Connection closed, reconnecting...');
-                startWhatsApp(bridge, log);
+                startWhatsApp(bridge, log, waRef).then(newSock => {
+                    if (waRef) waRef.sock = newSock;
+                });
             } else {
                 log.error('Logged out. Delete auth dir and restart.');
             }
@@ -173,6 +175,25 @@ async function extractContent(msg, log) {
             };
         } catch (err) {
             log.error({ err }, 'Failed to download audio');
+            return null;
+        }
+    }
+
+    // Document (PDF, text files, etc.)
+    if (m.documentMessage || m.documentWithCaptionMessage) {
+        const docMsg = m.documentWithCaptionMessage?.message?.documentMessage || m.documentMessage;
+        if (!docMsg) return null;
+        try {
+            const buffer = await downloadMediaMessage(msg, 'buffer', {});
+            return {
+                type: 'document',
+                caption: docMsg.caption || m.documentWithCaptionMessage?.message?.documentMessage?.caption || '',
+                mimetype: docMsg.mimetype || 'application/octet-stream',
+                filename: docMsg.fileName || 'document',
+                data: buffer.toString('base64'),
+            };
+        } catch (err) {
+            log.error({ err }, 'Failed to download document');
             return null;
         }
     }

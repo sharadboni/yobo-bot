@@ -30,7 +30,7 @@ async def execute_skill_node(state: dict) -> dict:
     if intent == "help":
         return {
             "reply_text": (
-                "*Available Commands:*\n\n"
+                "I'm your AI assistant on WhatsApp. You can chat with me, send voice notes, images, or documents and I'll understand them. Here's everything I can do:\n\n"
                 "*Chat & Search*\n"
                 "/search <query> — Search the web\n"
                 "/s <query> — Search shortcut\n"
@@ -57,6 +57,12 @@ async def execute_skill_node(state: dict) -> dict:
                 "  /voice set af bella\n"
                 "  /voice add myvoice Hello this is my voice\n"
                 "  (then send a voice note saying that)\n\n"
+                "*Documents*\n"
+                "Send a PDF or text file with a caption to process it.\n"
+                "Examples:\n"
+                "  Send a PDF with caption: Summarize this\n"
+                "  Send a CSV with caption: What are the top 5 entries?\n"
+                "Supported: PDF, TXT, CSV, HTML, Markdown, JSON\n\n"
                 "/help — Show this message\n\n"
                 "Or just send a message to chat! I can also understand voice notes and images."
             )
