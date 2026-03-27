@@ -7,6 +7,7 @@ import os
 import openai
 import httpx
 from agent.config import LLM_CONFIG
+from agent.constants import MAX_TOKENS_TOOL_ROUND, MAX_TOKENS_TOOL_ANSWER
 from agent.sanitize import sanitize_tool_output, wrap_tool_result
 
 log = logging.getLogger(__name__)
@@ -170,7 +171,7 @@ async def chat_completion_with_tools(
             # Cap max_tokens for tool-calling rounds to prevent runaway thinking.
             # The model only needs to decide which tool to call (~500 tokens),
             # not generate a full response. Final answer round uses full max_tokens.
-            tool_round_max_tokens = min(overrides.get("max_tokens", p["max_tokens"]), 4096)
+            tool_round_max_tokens = min(overrides.get("max_tokens", p["max_tokens"]), MAX_TOKENS_TOOL_ROUND)
 
             for round_num in range(max_rounds):
                 extra = tk["extra_body"] or openai.NOT_GIVEN
@@ -219,7 +220,7 @@ async def chat_completion_with_tools(
             resp = await client.chat.completions.create(
                 model=p["model"],
                 messages=msgs,
-                max_tokens=overrides.get("max_tokens", p["max_tokens"]),
+                max_tokens=overrides.get("max_tokens", min(p["max_tokens"], MAX_TOKENS_TOOL_ANSWER)),
                 temperature=overrides.get("temperature", p["temperature"]),
             )
             return _extract_content(resp.choices[0])

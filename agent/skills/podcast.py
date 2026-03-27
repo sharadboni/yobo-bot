@@ -1,9 +1,10 @@
 """Podcast skill — research a topic and generate a voice-note podcast."""
 from __future__ import annotations
 import logging
-from agent.tools import news_search_aggregated, web_search, read_page
+from agent.tools import news_search_aggregated, web_search, read_page, wikipedia
 from agent.services.llm import chat_completion
 from agent.services.voice_store import get_active_voice
+from agent.constants import MAX_TOKENS_PODCAST_SCRIPT, MAX_WORDS_PODCAST_MONO, MAX_WORDS_PODCAST_DIALOGUE
 
 log = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ material below, deliver a natural spoken monologue about the topic.
 Rules:
 - Write EXACTLY as you would speak out loud. No written formatting at all.
 - Use contractions, rhetorical questions, pauses, and natural transitions.
-- STRICT LENGTH: Maximum 200 words. This is absolutely critical.
+- STRICT LENGTH: Maximum 500 words. This is absolutely critical.
 - Start with a hook, cover key points, end with a takeaway.
 - FORBIDDEN: No asterisks, no bold, no bullet points, no headers, no markdown, \
 no brackets, no parenthetical notes, no speaker labels, no stage directions.
@@ -31,7 +32,7 @@ Rules:
 - HOST drives the conversation with questions and transitions. \
 GUEST provides insights and interesting takes.
 - Use contractions, reactions ("Right!", "Exactly", "That's wild"), and natural back-and-forth.
-- STRICT LENGTH: Maximum 300 words total. This is absolutely critical.
+- STRICT LENGTH: Maximum 700 words total. This is absolutely critical.
 - Start with HOST introducing the topic, end with a quick wrap-up.
 - FORBIDDEN: No asterisks, no bold, no bullet points, no headers, no markdown, \
 no brackets, no parenthetical notes, no stage directions.
@@ -48,8 +49,8 @@ The following podcast dialogue is too long. Condense it to under {max_words} wor
 keeping it natural and conversational. Preserve the HOST:/GUEST: labels on each line. \
 Do not add any formatting — output ONLY the dialogue lines."""
 
-MAX_WORDS_MONO = 200
-MAX_WORDS_DIALOGUE = 300
+MAX_WORDS_MONO = MAX_WORDS_PODCAST_MONO
+MAX_WORDS_DIALOGUE = MAX_WORDS_PODCAST_DIALOGUE
 MAX_RETRIES = 2
 MAX_PAGES_TO_READ = 3
 
@@ -115,22 +116,56 @@ def _parse_dialogue(script: str, host_voice: dict, guest_voice: str) -> list[dic
 
 
 async def _research(topic: str) -> str | None:
-    """Search and read pages for a topic. Returns research text or None."""
-    log.info("[podcast] Searching for: %s", topic)
-    search_results = await news_search_aggregated(topic)
+    """Gather research from news, Wikipedia, and web search concurrently."""
+    import asyncio
+    log.info("[podcast] Researching: %s", topic)
 
-    if not search_results or search_results.startswith("All search providers failed"):
+    # Fetch news, Wikipedia, and web search in parallel
+    async def _safe(name, coro):
+        try:
+            result = await coro
+            if result and not result.startswith("All search providers failed"):
+                log.info("[podcast] %s returned %d chars", name, len(result))
+                return result
+        except Exception as e:
+            log.warning("[podcast] %s failed: %s", name, e)
+        return ""
+
+    news_result, wiki_result, web_result = await asyncio.gather(
+        _safe("news", news_search_aggregated(topic)),
+        _safe("wikipedia", wikipedia(topic)),
+        _safe("web_search", web_search(topic)),
+    )
+
+    if not news_result and not wiki_result and not web_result:
         return None
 
-    urls = [line.strip() for line in search_results.split("\n") if line.strip().startswith("http")]
+    # Read top pages from news + web results for deeper content
+    all_text = (news_result or "") + "\n" + (web_result or "")
+    urls = [line.strip() for line in all_text.split("\n") if line.strip().startswith("http")]
+    # Deduplicate URLs
+    seen = set()
+    unique_urls = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            unique_urls.append(u)
+
     page_contents = []
-    for url in urls[:MAX_PAGES_TO_READ]:
+    for url in unique_urls[:MAX_PAGES_TO_READ]:
         log.info("[podcast] Reading: %s", url)
         content = await read_page(url)
         if content and not content.startswith("Failed") and not content.startswith("Cannot"):
             page_contents.append(content[:2000])
 
-    research = f"SEARCH RESULTS:\n{search_results}\n\n"
+    # Build research document
+    research = ""
+    if news_result:
+        research += f"NEWS RESULTS:\n{news_result}\n\n"
+    if wiki_result:
+        research += f"BACKGROUND (Wikipedia):\n{wiki_result[:3000]}\n\n"
+    if web_result:
+        research += f"WEB SEARCH:\n{web_result}\n\n"
     if page_contents:
         research += "DETAILED CONTENT:\n\n"
         for i, content in enumerate(page_contents, 1):
@@ -150,7 +185,7 @@ async def _generate_and_condense(
     script = await chat_completion([
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"Topic: {topic}\n\n{research}\n\nSpeak now."},
-    ], max_tokens=768, no_think=True)
+    ], max_tokens=MAX_TOKENS_PODCAST_SCRIPT, no_think=True)
 
     word_count = len(script.split())
     for attempt in range(MAX_RETRIES):
@@ -160,7 +195,7 @@ async def _generate_and_condense(
         script = await chat_completion([
             {"role": "system", "content": condense_prompt_tmpl.format(max_words=max_words)},
             {"role": "user", "content": script},
-        ], max_tokens=768, no_think=True)
+        ], max_tokens=MAX_TOKENS_PODCAST_SCRIPT, no_think=True)
         word_count = len(script.split())
 
     if word_count > max_words:

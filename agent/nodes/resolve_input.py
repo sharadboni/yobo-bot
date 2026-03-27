@@ -6,6 +6,7 @@ import base64
 import tempfile
 import os
 from agent.services.llm import transcribe_audio, vision_completion
+from agent.constants import MAX_DOC_CHARS
 from agent.sanitize import sanitize_tool_output, wrap_tool_result
 from agent.services.voice_store import (
     get_pending_voice, clear_pending_voice,
@@ -13,9 +14,6 @@ from agent.services.voice_store import (
 )
 
 log = logging.getLogger(__name__)
-
-# Max chars to extract from a document before truncating
-MAX_DOC_CHARS = 20000
 
 SUPPORTED_DOC_MIMES = {
     "application/pdf",

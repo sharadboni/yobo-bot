@@ -3,7 +3,10 @@ from __future__ import annotations
 import logging
 from agent.tools import web_search, news_search, read_page
 from agent.services.llm import chat_completion
-from agent.config import SYSTEM_PROMPT
+from agent.config import get_system_prompt_tools
+from agent.constants import (
+    MAX_TOKENS_SCHEDULED_NEWS, MAX_TOKENS_SCHEDULED_SEARCH, MAX_TOKENS_SCHEDULED_PODCAST,
+)
 from agent.skills.podcast import PODCAST_SCRIPT_PROMPT
 
 log = logging.getLogger(__name__)
@@ -15,7 +18,7 @@ async def handle_news(task: dict) -> str:
     results = await news_search(topic)
 
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": get_system_prompt_tools()},
         {
             "role": "user",
             "content": (
@@ -25,7 +28,7 @@ async def handle_news(task: dict) -> str:
             ),
         },
     ]
-    return await chat_completion(messages, no_think=True)
+    return await chat_completion(messages, max_tokens=MAX_TOKENS_SCHEDULED_NEWS, no_think=True)
 
 
 async def handle_search(task: dict) -> str:
@@ -34,7 +37,7 @@ async def handle_search(task: dict) -> str:
     results = await web_search(query)
 
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": get_system_prompt_tools()},
         {
             "role": "user",
             "content": (
@@ -44,7 +47,7 @@ async def handle_search(task: dict) -> str:
             ),
         },
     ]
-    return await chat_completion(messages, no_think=True)
+    return await chat_completion(messages, max_tokens=MAX_TOKENS_SCHEDULED_SEARCH, no_think=True)
 
 
 async def handle_podcast(task: dict) -> str:
@@ -69,4 +72,4 @@ async def handle_podcast(task: dict) -> str:
         {"role": "system", "content": PODCAST_SCRIPT_PROMPT},
         {"role": "user", "content": f"Topic: {topic}\n\n{research}\n\nWrite the podcast script now."},
     ]
-    return await chat_completion(messages, max_tokens=2048, no_think=True)
+    return await chat_completion(messages, max_tokens=MAX_TOKENS_SCHEDULED_PODCAST, no_think=True)

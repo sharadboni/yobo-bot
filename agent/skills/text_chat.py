@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from agent.services.llm import chat_completion, chat_completion_with_tools, chat_completion_fast
 from agent.config import get_system_prompt_fast, get_system_prompt_tools, get_system_prompt_document, MAX_HISTORY
+from agent.constants import MAX_TOKENS_CLASSIFIER
 from agent.tools import TOOLS, TOOL_EXECUTORS
 
 log = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ async def _needs_tools(text: str) -> bool:
         reply = await chat_completion_fast([
             {"role": "system", "content": _CLASSIFY_PROMPT},
             {"role": "user", "content": text},
-        ], max_tokens=1, temperature=0)
+        ], max_tokens=MAX_TOKENS_CLASSIFIER, temperature=0)
         result = reply.strip().lower().startswith("yes")
         log.info("Classifier: %r -> needs_tools=%s", text[:50], result)
         return result
