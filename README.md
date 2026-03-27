@@ -16,13 +16,14 @@ WhatsApp <-> Gateway (Node.js/Baileys) <-> WebSocket :8765 <-> Agent (Python/Lan
 | **Voice notes** | Send a voice note and get a voice reply back (speech-to-speech) |
 | **Images** | Send a photo with a caption like "What is this?" |
 | **Documents** | Send a PDF, CSV, or text file with a caption like "Summarize this" |
-| **Podcasts** | `/podcast <topic>` generates a researched voice-note podcast |
+| **Weather** | Ask about weather anywhere — uses Open-Meteo API with date range support |
+| **Podcasts** | `/podcast <topic>` generates a 3-4 minute researched voice-note podcast |
 | **Two-voice podcasts** | `/podcast <topic> --dialogue` creates a HOST/GUEST conversation |
 | **Scheduled updates** | `/schedule news daily 8am AI technology` delivers recurring digests |
 | **Voice cloning** | Clone your own voice from a 3-second sample for TTS replies |
 | **50+ voice presets** | Switch between voices with `/voice set af_bella` |
 | **Web search** | `/search <query>` or just ask — the bot decides when to search |
-| **News aggregation** | Pulls from 10 sources: Google News, Hacker News, Reuters, AP, BBC, Al Jazeera, NPR, WSJ, Ars Technica, NDTV |
+| **News aggregation** | LLM picks relevant sources per query from: Google News, Hacker News, Reuters, AP, BBC, Al Jazeera, NPR, WSJ, Ars Technica, NDTV |
 
 ## Quick Start
 
@@ -76,7 +77,7 @@ Or just ask naturally — the bot automatically searches when needed.
 | `/podcast <topic> --dialogue` | `/podcast space exploration --dialogue` |
 | `/p <topic>` | `/p tech news --duo` |
 
-The `--dialogue` / `--duo` flag creates a two-voice conversation. HOST uses your active voice, GUEST is automatically picked as a contrasting voice.
+The `--dialogue` / `--duo` flag creates a two-voice conversation. HOST uses your active voice, GUEST is automatically picked as a contrasting voice. Scripts are ~500 words (mono) or ~700 words (dialogue) for 3-4 minutes of audio.
 
 ### Documents
 
@@ -89,7 +90,7 @@ Send any file with a caption — the caption is your instruction.
 | JSON | "Review this config for issues" |
 | TXT, HTML, Markdown, XML | "Extract the key points" |
 
-No caption defaults to "Summarize this document."
+No caption defaults to "Summarize this document." Documents up to 200k characters are supported.
 
 ### Scheduling
 
@@ -103,6 +104,8 @@ No caption defaults to "Summarize this document."
 |---|---|
 | `/schedules` | List your scheduled tasks |
 | `/unschedule <id>` | Remove a task |
+
+Scheduled tasks use the same research pipeline as live requests — aggregated news from multiple sources with page reads for deeper content.
 
 ### Voice
 
@@ -154,30 +157,31 @@ yobo-bot/
 ├── agent/                         # Python AI agent
 │   ├── main.py                    # WebSocket client, message dispatch
 │   ├── graph.py                   # LangGraph pipeline definition
-│   ├── config.py                  # System prompt, LLM config loader
+│   ├── config.py                  # System prompts (3 independent), LLM config loader
+│   ├── constants.py               # Token limits, temperatures, generation parameters
 │   ├── sanitize.py                # Prompt injection defenses
-│   ├── tools.py                   # Web search, news, Wikipedia, Playwright
+│   ├── tools.py                   # Web search, news, weather, Wikipedia, Playwright
 │   ├── nodes/                     # Pipeline stages
 │   │   ├── load_user.py           # Profile loading, admin approval gate
 │   │   ├── resolve_input.py       # Text/audio/image/document normalization
 │   │   ├── classify_intent.py     # Command routing
-│   │   ├── execute_skill.py       # Skill execution
-│   │   ├── tts.py                 # Text-to-speech generation
+│   │   ├── execute_skill.py       # Skill execution + /help
+│   │   ├── tts.py                 # Text-to-speech (single + multi-voice dialogue)
 │   │   └── save_user.py           # History management
 │   ├── skills/                    # User-facing capabilities
-│   │   ├── text_chat.py           # Smart routing + tool calling
+│   │   ├── text_chat.py           # Classifier + smart routing + tool calling
 │   │   ├── web_search.py          # /search command
-│   │   ├── podcast.py             # Research + script + TTS
+│   │   ├── podcast.py             # Research + script + multi-voice TTS
 │   │   ├── schedule.py            # Recurring tasks
 │   │   └── voice.py               # Voice management
 │   └── services/                  # Backend services
-│       ├── llm.py                 # LLM calls with fallback chains
+│       ├── llm.py                 # LLM calls with fallback chains + thinking control
 │       ├── user_store.py          # File-based profiles with locking
 │       ├── voice_store.py         # Voice sample storage
 │       ├── scheduler.py           # Background task scheduler
-│       └── task_handlers.py       # Scheduled task executors
+│       └── task_handlers.py       # Scheduled task executors (same pipeline as live)
 └── data/                          # Runtime data (gitignored)
-    ├── users/                     # Per-user profiles
+    ├── users/                     # Per-user profiles (50 messages history)
     ├── schedules/                 # Per-user schedule files
     ├── voices/                    # Voice samples for cloning
     └── auth/                      # Baileys WhatsApp session
@@ -192,21 +196,21 @@ load_user -> resolve_input -> classify_intent -> execute_skill -> tts -> save_us
 ```
 
 - **load_user** — loads profile, gates new/ignored users, notifies admin of new contacts
-- **resolve_input** — normalizes input: text passthrough, audio->STT, image->vision, document->text extraction
+- **resolve_input** — normalizes input: text passthrough, audio→STT, image→vision, document→text extraction (with prompt injection sanitization)
 - **classify_intent** — routes `/commands` to skills, everything else to `text_chat`
-- **execute_skill** — runs the matched skill
-- **tts** — generates voice reply if the input was audio or the skill requests it
-- **save_user** — appends to chat history, trims, saves
+- **execute_skill** — runs the matched skill (text_chat, web_search, podcast, schedule, voice)
+- **tts** — generates voice reply: single voice via `/v1/audio/speech`, multi-voice via `/v1/audio/dialogue`
+- **save_user** — appends to chat history, trims to 50 messages, saves with file lock
 
 ### Smart Routing
 
-Every message is routed to the right model based on what it needs:
+Every free-text message is routed to the right model:
 
 ```
 User message
   │
   ▼
-Classifier (fast model, 1 token) — "Does this need a lookup?"
+Classifier (fast model, 1 token, temp=0) — "Does this need a lookup?"
   │
   ├── No  → Fast model (4B, short reply, ~2-5s)
   │
@@ -215,32 +219,50 @@ Classifier (fast model, 1 token) — "Does this need a lookup?"
 
 **Full routing table:**
 
-| Input | Classifier | Model | Prompt |
+| Input | Classifier | Model | History | Prompt |
+|---|---|---|---|---|
+| Simple chat ("Hi", jokes, coding) | yes → no | Fast (4B) | last 20 msgs | Short (2-3 sentences) |
+| Needs lookup (news, weather, facts) | yes → yes | Big (9B) + tools | last 20 msgs | Tool-first ("MUST call a tool") |
+| Document with caption | skipped | Big (9B), no tools | last 20 msgs | Document analysis |
+| `/search <query>` | skipped | Big (9B) | — | Direct search |
+| `/podcast <topic>` | skipped | Big (9B) | — | Script generation |
+| Scheduled news/search | skipped | Big (9B) | — | Same pipeline as live requests |
+| Voice note | STT first | then classifier | — | — |
+| Image with caption | Vision first | then classifier | — | — |
+
+**Classifier:** Defaults to YES on failure — safer to use tools than to hallucinate.
+
+### Prompt Architecture
+
+Three fully independent system prompts — no shared base, no conflicting instructions:
+
+| Path | First line | Focus | Temperature |
 |---|---|---|---|
-| Simple chat ("Hi", jokes, coding) | yes → no | Fast (4B) | Short (2-3 sentences) |
-| Needs lookup (news, weather, companies) | yes → yes | Big (9B) + tools | Tool-first ("MUST call a tool") |
-| Document with caption | skipped | Big (9B), no tools | Document analysis |
-| `/search <query>` | skipped | Big (9B) | Direct search |
-| `/podcast <topic>` | skipped | Big (9B) | Script generation |
-| Scheduled news/search | skipped | Big (9B) | Task handler |
-| Voice note | STT first | then classifier | — |
-| Image with caption | Vision first | then classifier | — |
+| **Fast** (4B) | "You are Yobo, a WhatsApp assistant" | 2-3 sentences, no tool mentions | 0.5 |
+| **Tools** (9B) | "You MUST call a tool before answering" | Tool routing table, complete answers | 0.5 |
+| **Document** (9B) | "Analyze the document content" | Thorough but scannable | 0.3 |
 
-**Classifier:** Only runs for free-text messages (not `/commands`, documents, or skills). Asks the fast model "does this need a lookup?" in ~1 second. Defaults to YES on failure — safer to use tools than to hallucinate.
+The tool-calling prompt puts the imperative first because the model weights early instructions most heavily. All prompts inject today's date at runtime.
 
-**Prompt architecture:** Three fully independent system prompts, each optimized for its path. No shared base — eliminates conflicting instructions:
+### Generation Parameters
 
-| Path | Prompt focus | Size |
+All token limits and temperatures are centralized in `agent/constants.py`:
+
+| Task | Max Tokens | Temperature |
 |---|---|---|
-| Fast (4B) | "2-3 sentences, no tool mentions" | ~350 chars |
-| Tools (9B) | "MUST call a tool" as first line, tool routing table | ~1000 chars |
-| Document (9B) | "Analyze the document" | ~420 chars |
-
-The tool-calling prompt puts "You MUST call a tool" as the very first sentence. With thinking disabled, the model weights early instructions most heavily — this ensures it calls tools instead of answering from memory.
+| Classifier | 1 | 0.0 |
+| Source picker | 30 | 0.0 |
+| Fast chat | 512 | 0.5 |
+| Tool round (per call) | 4,096 | 0.5 |
+| Tool final answer | 8,192 | 0.7 |
+| Document processing | 8,192 | 0.3 |
+| Podcast script | 2,048 | 0.85 |
+| Scheduled news | 6,000 | 0.5 |
+| Scheduled search | 4,096 | 0.5 |
 
 ### News Aggregation
 
-The fast model picks 3-5 relevant sources per query (Google News is always included):
+The fast model picks 3-5 relevant sources per query (Google News always included):
 
 | Source | Specialty |
 |---|---|
@@ -252,32 +274,50 @@ The fast model picks 3-5 relevant sources per query (Google News is always inclu
 | Ars Technica | Tech deep dives, science |
 | NDTV | India, South Asia |
 
-The LLM picks sources based on the query topic — "AI funding" gets HN + WSJ, "Gaza" gets Al Jazeera + BBC, "India cricket" gets NDTV. Each result is tagged with its source so the summarizing LLM can synthesize across perspectives.
+Source selection is LLM-driven: "AI funding" → HN + WSJ, "Gaza" → Al Jazeera + BBC, "India cricket" → NDTV. Each result is tagged with its source for cross-perspective synthesis.
+
+### Podcast Research Pipeline
+
+Podcasts gather research from three sources concurrently, then generate a script:
+
+```
+/podcast quantum computing
+  ├── news_search_aggregated() ─┐
+  ├── wikipedia()               ├── concurrent
+  ├── web_search()             ─┘
+  ├── Read top 3 page URLs (Playwright)
+  ├── Generate script (9B, temp=0.85, max 500/700 words)
+  ├── Condense if over limit (up to 2 retries)
+  └── TTS: single voice or multi-voice dialogue
+```
 
 ### Connection Resilience
 
-- Gateway uses a mutable socket reference — reconnections automatically use the fresh connection
+- Gateway uses a mutable socket proxy — WhatsApp reconnections automatically use the fresh connection
 - WhatsApp sends retry up to 3 times with 5s delay on connection drops
 - Agent WebSocket uses ping/pong (20s interval, 10s timeout)
 - `make stop` kills orphan processes via `pgrep` to prevent zombie accumulation
+- Scheduled messages go through `markdown_to_whatsapp` + `sanitize_llm_output` before sending
 
 ## LLM Configuration
 
-Edit `agent/llm_config.yaml` to configure endpoints. Each capability has a fallback chain — providers are tried in order.
+Edit `agent/llm_config.yaml` to configure endpoints. Each capability has a fallback chain — providers are tried in order. Add `type: mlx_omni` for mlx-omni-server providers to enable native thinking control.
 
 ```yaml
-text:                                  # Tool-calling model
+text:                                  # Tool-calling model (9B)
   - name: local-llm
+    type: mlx_omni
     base_url: http://YOUR_LAN_IP:52415/v1
-    model: mlx-community/Qwen3.5-9B-8bit
-    max_tokens: 32000
+    model: mlx-community/Qwen3.5-9B-4bit
+    max_tokens: 60000
     temperature: 0.5
 
-text_fast:                             # Fast chat model
+text_fast:                             # Fast chat model (4B)
   - name: local-fast
+    type: mlx_omni
     base_url: http://YOUR_LAN_IP:52415/v1
     model: mlx-community/Qwen3.5-4B-4bit
-    max_tokens: 256
+    max_tokens: 512
     temperature: 0.5
 
 vision:                                # Image analysis
@@ -308,8 +348,8 @@ Use `${ENV_VAR}` in YAML values to reference `.env` variables.
 - **Document sanitization** — uploaded files are sanitized before LLM processing
 - **URL validation** — blocks SSRF (private networks) and exfiltration endpoints
 - **LLM output sanitization** — redacts leaked JIDs, file paths, and API keys
-- **System prompt hardening** — rules against data leaks, instruction override, cross-user access
 - **Per-user data isolation** — separate files per user with path traversal protection
 - **Tool result wrapping** — boundary markers so the LLM distinguishes data from instructions
+- **Scheduled output sanitization** — markdown stripping + output sanitization before delivery
 
 > **Disclaimer:** These defenses reduce the risk of prompt injection but cannot eliminate it entirely. LLMs are inherently susceptible to adversarial inputs, and novel attack vectors are discovered regularly. Do not use this bot to process sensitive or confidential documents. Do not rely on it for security-critical decisions. Use at your own risk.

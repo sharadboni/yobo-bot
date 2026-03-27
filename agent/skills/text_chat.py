@@ -34,11 +34,16 @@ async def _needs_tools(text: str) -> bool:
         return True  # safer to use tools than to hallucinate
 
 
-def _build_messages(system_prompt: str, profile: dict, resolved_text: str) -> list[dict]:
-    """Build the LLM message list from profile history + current input."""
+def _build_messages(system_prompt: str, profile: dict, resolved_text: str, include_history: bool = True) -> list[dict]:
+    """Build the LLM message list from profile history + current input.
+
+    include_history=False for tool-calling paths — forces fresh data lookups
+    instead of reusing stale answers from chat history.
+    """
     messages = [{"role": "system", "content": system_prompt}]
-    for entry in profile.get("history", [])[-CONTEXT_TURNS:]:
-        messages.append({"role": entry["role"], "content": entry["content"]})
+    if include_history:
+        for entry in profile.get("history", [])[-CONTEXT_TURNS:]:
+            messages.append({"role": entry["role"], "content": entry["content"]})
     messages.append({"role": "user", "content": resolved_text})
     return messages
 

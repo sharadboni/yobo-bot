@@ -28,6 +28,7 @@ def register_handler(task_type: str, handler):
 def _user_schedule_path(user_jid: str) -> str:
     """Per-user schedule file: data/schedules/<number>.json"""
     from agent.jid import jid_to_number
+from agent.sanitize import sanitize_llm_output, markdown_to_whatsapp
     os.makedirs(SCHEDULES_DIR, exist_ok=True)
     return os.path.join(SCHEDULES_DIR, f"{jid_to_number(user_jid)}.json")
 
@@ -152,10 +153,11 @@ async def _execute_task(task: dict):
         if not result_text:
             return
 
+        clean_text = markdown_to_whatsapp(sanitize_llm_output(result_text, user_jid=task["user_jid"]))
         reply_msg = {
             "type": "reply",
             "to": task["user_jid"],
-            "content": {"text": f"Scheduled update — {task['task_args']}:\n\n{result_text}"},
+            "content": {"text": f"Scheduled update — {task['task_args']}:\n\n{clean_text}"},
         }
 
         # Generate audio if requested
