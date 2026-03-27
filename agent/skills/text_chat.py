@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 from agent.services.llm import chat_completion, chat_completion_with_tools, chat_completion_fast
-from agent.config import get_system_prompt, get_system_prompt_fast, get_system_prompt_tools, MAX_HISTORY
+from agent.config import get_system_prompt_fast, get_system_prompt_tools, get_system_prompt_document, MAX_HISTORY
 from agent.tools import TOOLS, TOOL_EXECUTORS
 
 log = logging.getLogger(__name__)
@@ -10,20 +10,11 @@ log = logging.getLogger(__name__)
 CONTEXT_TURNS = min(20, MAX_HISTORY)
 
 _CLASSIFY_PROMPT = (
-    "You are a classifier. You have access to the internet via web search, news search, "
-    "and Wikipedia tools. Given a user message, decide if answering it requires "
-    "looking up information.\n\n"
-    "Output YES if the question is about:\n"
-    "- Current events, news, headlines, recent happenings\n"
-    "- Weather, prices, stocks, live scores, schedules\n"
-    "- Specific companies, products, funding rounds, releases\n"
-    "- Facts you're not 100% sure about\n"
-    "- Anything that needs up-to-date or verifiable data\n\n"
-    "Output NO if the question is:\n"
-    "- Greetings, small talk, opinions, jokes\n"
-    "- Math, coding help, explanations of well-known concepts\n"
-    "- Creative writing, translations, formatting requests\n\n"
-    "When in doubt, output YES. Output ONLY one word: yes or no"
+    "Decide if this message needs a data lookup (news, weather, prices, "
+    "companies, facts, events) or can be answered from general knowledge "
+    "(greetings, math, coding, opinions, creative writing).\n"
+    "When in doubt, output YES.\n"
+    "Output ONLY: yes or no"
 )
 
 
@@ -38,8 +29,8 @@ async def _needs_tools(text: str) -> bool:
         log.info("Classifier: %r -> needs_tools=%s", text[:50], result)
         return result
     except Exception as e:
-        log.warning("Classifier failed, defaulting to no tools: %s", e)
-        return False
+        log.warning("Classifier failed, defaulting to tools: %s", e)
+        return True  # safer to use tools than to hallucinate
 
 
 def _build_messages(system_prompt: str, profile: dict, resolved_text: str) -> list[dict]:
@@ -53,17 +44,17 @@ def _build_messages(system_prompt: str, profile: dict, resolved_text: str) -> li
 
 # Keep for external use (e.g. task_handlers)
 def build_llm_messages(profile: dict, resolved_text: str) -> list[dict]:
-    return _build_messages(get_system_prompt(), profile, resolved_text)
+    return _build_messages(get_system_prompt_tools(), profile, resolved_text)
 
 
 async def text_chat(state: dict) -> dict:
     profile = state.get("user_profile", {})
     resolved = state.get("resolved_text", "")
 
-    # Document inputs: skip classifier, use big model with no_think for direct processing
+    # Document inputs: skip classifier, use document prompt
     if "[TOOL RESULT from document:" in resolved:
         log.info("Routing document to text model (no tools): %s", resolved[:60])
-        messages = _build_messages(get_system_prompt_tools(), profile, resolved)
+        messages = _build_messages(get_system_prompt_document(), profile, resolved)
         reply = await chat_completion(messages, no_think=True)
         return {"reply_text": reply}
 

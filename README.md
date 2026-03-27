@@ -210,43 +210,49 @@ Classifier (fast model, 1 token) — "Does this need a lookup?"
   │
   ├── No  → Fast model (4B, short reply, ~2-5s)
   │
-  └── Yes → Big model (9B) + tools (news, search, weather, wiki, ~10-60s)
+  └── Yes → Big model (9B) + tools (news, search, weather, wiki, ~30-90s)
 ```
 
 **Full routing table:**
 
-| Input | Classifier | Model | Thinking | Prompt style |
-|---|---|---|---|---|
-| Simple chat ("Hi", jokes, coding) | yes → no | Fast (4B) | off | Short (2-3 sentences) |
-| Needs lookup (news, weather, companies) | yes → yes | Big (9B) + tools | on | Detailed (complete lists) |
-| Document with caption | skipped | Big (9B), no tools | off | Detailed |
-| `/search <query>` | skipped | Big (9B) | off | Direct search |
-| `/podcast <topic>` | skipped | Big (9B) | off | Script generation |
-| Scheduled news/search | skipped | Big (9B) | off | Task handler |
-| Voice note | STT first | then classifier as above | — | — |
-| Image with caption | Vision first | then classifier as above | — | — |
+| Input | Classifier | Model | Prompt |
+|---|---|---|---|
+| Simple chat ("Hi", jokes, coding) | yes → no | Fast (4B) | Short (2-3 sentences) |
+| Needs lookup (news, weather, companies) | yes → yes | Big (9B) + tools | Tool-first ("MUST call a tool") |
+| Document with caption | skipped | Big (9B), no tools | Document analysis |
+| `/search <query>` | skipped | Big (9B) | Direct search |
+| `/podcast <topic>` | skipped | Big (9B) | Script generation |
+| Scheduled news/search | skipped | Big (9B) | Task handler |
+| Voice note | STT first | then classifier | — |
+| Image with caption | Vision first | then classifier | — |
 
-**When the classifier runs:** Only for free-text messages (not `/commands`, documents, or direct skills). It asks the fast model "does this need a lookup?" and gets yes/no in ~1 second. It errs on the side of yes — company info, funding rounds, specific facts all trigger a lookup.
+**Classifier:** Only runs for free-text messages (not `/commands`, documents, or skills). Asks the fast model "does this need a lookup?" in ~1 second. Defaults to YES on failure — safer to use tools than to hallucinate.
 
-**Thinking mode:** Only enabled for tool-calling requests so the model reasons about which tools to use. Disabled everywhere else for faster responses. The server strips thinking content before returning.
+**Prompt architecture:** Three fully independent system prompts, each optimized for its path. No shared base — eliminates conflicting instructions:
 
-**System prompts:** The fast model gets "keep it to 2-3 sentences." The tool-calling model gets "give complete answers, summarize in your own words, never fabricate data."
+| Path | Prompt focus | Size |
+|---|---|---|
+| Fast (4B) | "2-3 sentences, no tool mentions" | ~350 chars |
+| Tools (9B) | "MUST call a tool" as first line, tool routing table | ~1000 chars |
+| Document (9B) | "Analyze the document" | ~420 chars |
+
+The tool-calling prompt puts "You MUST call a tool" as the very first sentence. With thinking disabled, the model weights early instructions most heavily — this ensures it calls tools instead of answering from memory.
 
 ### News Aggregation
 
-News queries fetch from 10 sources concurrently and deduplicate results:
+The fast model picks 3-5 relevant sources per query (Google News is always included):
 
-| Source | Type |
+| Source | Specialty |
 |---|---|
-| Google News | General aggregator |
-| Hacker News | Tech community (via Algolia API) |
-| Reuters, AP | Wire services (neutral, factual) |
+| Google News | General aggregator (always included) |
+| Hacker News | Tech, startups, AI (via Algolia API) |
+| Reuters, AP | Wire services, neutral/factual |
 | BBC, Al Jazeera | International perspectives |
-| NPR, WSJ | US varied editorial leanings |
-| Ars Technica | Tech, in-depth |
-| NDTV | India |
+| NPR, WSJ | US politics, business/finance |
+| Ars Technica | Tech deep dives, science |
+| NDTV | India, South Asia |
 
-Each result is tagged with its source so the LLM can synthesize across perspectives.
+The LLM picks sources based on the query topic — "AI funding" gets HN + WSJ, "Gaza" gets Al Jazeera + BBC, "India cricket" gets NDTV. Each result is tagged with its source so the summarizing LLM can synthesize across perspectives.
 
 ### Connection Resilience
 

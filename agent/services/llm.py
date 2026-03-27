@@ -81,11 +81,12 @@ def _thinking_kwargs(p: dict, no_think: bool) -> dict:
 
 
 def _thinking_kwargs_tools(p: dict) -> dict:
-    """Thinking kwargs for tool-calling requests. Thinking ON so the model
-    reasons about which tools to call (without it, it often skips tools entirely).
+    """Thinking kwargs for tool-calling requests.
+    Thinking OFF — thinking=true causes timeouts on local 9B models.
+    The system prompt instructs the model to always use tools for current data.
     """
     if p.get("type") == "mlx_omni" or "8765" in p.get("base_url", ""):
-        return {"extra_body": {"thinking": True}}
+        return {"extra_body": {"thinking": False}}
     return {"extra_body": {}}
 
 
@@ -166,14 +167,22 @@ async def chat_completion_with_tools(
             msgs = list(messages)
             tk = _thinking_kwargs_tools(p)
 
+            # Cap max_tokens for tool-calling rounds to prevent runaway thinking.
+            # The model only needs to decide which tool to call (~500 tokens),
+            # not generate a full response. Final answer round uses full max_tokens.
+            tool_round_max_tokens = min(overrides.get("max_tokens", p["max_tokens"]), 4096)
+
             for round_num in range(max_rounds):
+                extra = tk["extra_body"] or openai.NOT_GIVEN
+                log.info("[tools] round=%d provider=%s max_tokens=%d extra_body=%s tools=%d",
+                         round_num, p["name"], tool_round_max_tokens, extra, len(tools))
                 resp = await client.chat.completions.create(
                     model=p["model"],
                     messages=msgs,
                     tools=tools,
-                    max_tokens=overrides.get("max_tokens", p["max_tokens"]),
+                    max_tokens=tool_round_max_tokens,
                     temperature=overrides.get("temperature", p["temperature"]),
-                    extra_body=tk["extra_body"] or openai.NOT_GIVEN,
+                    extra_body=extra,
                 )
                 choice = resp.choices[0]
 

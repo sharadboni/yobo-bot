@@ -42,13 +42,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": (
-                "Search the web and return a list of results with titles, snippets, and URLs. "
-                "Use this for questions about prices, current events, or anything "
-                "that needs up-to-date data. Do NOT use this for weather — use the weather tool instead. "
-                "If the snippets don't contain enough information, "
-                "use read_page to visit the most promising URLs."
-            ),
+            "description": "Search the web for current data (prices, events, general queries). Not for weather or news.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -65,11 +59,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "news_search",
-            "description": (
-                "Search for recent news articles on a topic. Use this instead of web_search "
-                "when the user asks about news, current events, headlines, or what happened recently. "
-                "Returns headlines with summaries from major news sources via RSS feeds."
-            ),
+            "description": "Search for news, headlines, and current events from multiple sources.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -86,11 +76,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "wikipedia",
-            "description": (
-                "Look up a topic on Wikipedia. Use this for factual questions about people, "
-                "places, history, science, concepts, or anything encyclopedic. Returns a "
-                "summary and the full article text. Free and unlimited."
-            ),
+            "description": "Look up facts about people, places, history, science on Wikipedia.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -107,11 +93,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "read_page",
-            "description": (
-                "Fetch and read the text content of a web page URL. "
-                "Use this after web_search to get detailed information from a specific result. "
-                "Returns the main text content of the page."
-            ),
+            "description": "Read the full text content of a web page URL.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -128,11 +110,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "weather",
-            "description": (
-                "Get weather forecast for a location. Use this for ANY weather-related question. "
-                "Supports forecasts up to 16 days ahead. You can specify a date range. "
-                "Returns daily high/low temperatures, precipitation, and conditions."
-            ),
+            "description": "Get weather forecast for a location with optional date range (up to 16 days).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -456,33 +434,80 @@ async def news_search(query: str) -> str:
     return await news_search_aggregated(query)
 
 
-async def news_search_aggregated(query: str, max_per_source: int = 3) -> str:
-    """Aggregate news from multiple sources concurrently. For podcasts and deep research.
+_SOURCE_LABELS = {
+    "google_news": "Google News",
+    "hackernews": "Hacker News",
+    "reuters": "Reuters",
+    "ap": "AP News",
+    "bbc": "BBC",
+    "aljazeera": "Al Jazeera",
+    "npr": "NPR",
+    "wsj": "Wall Street Journal",
+    "ars": "Ars Technica",
+    "ndtv": "NDTV",
+}
 
-    Fetches Google News, Hacker News, Reuters, BBC, and AP in parallel,
-    deduplicates by URL, and returns combined results.
+_SOURCE_PICKER_PROMPT = (
+    "You are a news source selector. Given a query, pick the 3-4 most relevant "
+    "sources from this list:\n\n"
+    "hackernews — tech, startups, AI, programming\n"
+    "reuters — breaking news, wire service, factual\n"
+    "ap — US news, politics, general\n"
+    "bbc — international, UK, Europe\n"
+    "aljazeera — Middle East, Global South, conflict\n"
+    "npr — US politics, culture, health, science\n"
+    "wsj — business, finance, markets, economy\n"
+    "ars — tech deep dives, science, space\n"
+    "ndtv — India, South Asia, cricket\n\n"
+    "Output ONLY the source names separated by commas. Nothing else.\n"
+    "Example: hackernews, ars, reuters"
+)
+
+# Always included
+_BASE_SOURCES = ["google_news"]
+_DEFAULT_EXTRAS = ["reuters", "bbc", "ap"]
+
+
+async def _pick_sources(query: str) -> list[str]:
+    """Use the fast model to pick relevant news sources for a query."""
+    from agent.services.llm import chat_completion_fast
+
+    try:
+        reply = await chat_completion_fast([
+            {"role": "system", "content": _SOURCE_PICKER_PROMPT},
+            {"role": "user", "content": query},
+        ], max_tokens=30, temperature=0)
+
+        # Parse comma-separated source names
+        picked = [s.strip().lower() for s in reply.split(",")]
+        valid = [s for s in picked if s in _SOURCE_LABELS and s != "google_news"]
+
+        if not valid:
+            valid = list(_DEFAULT_EXTRAS)
+
+        selected = list(_BASE_SOURCES) + valid[:4]
+        log.info("[news] LLM picked sources for %r: %s", query[:40], selected)
+        return selected
+    except Exception as e:
+        log.warning("[news] Source picker failed (%s), using defaults", e)
+        return list(_BASE_SOURCES) + list(_DEFAULT_EXTRAS)
+
+
+async def news_search_aggregated(query: str, max_per_source: int = 3) -> str:
+    """Aggregate news from topic-relevant sources concurrently.
+
+    Always includes Google News + Reuters, then picks 2-4 extra sources
+    based on query keywords. Deduplicates by URL.
     """
     import asyncio
 
-    _SOURCE_LABELS = {
-        "google_news": "Google News",
-        "hackernews": "Hacker News",
-        "reuters": "Reuters",
-        "ap": "AP News",
-        "bbc": "BBC",
-        "aljazeera": "Al Jazeera",
-        "npr": "NPR",
-        "wsj": "Wall Street Journal",
-        "ars": "Ars Technica",
-        "ndtv": "NDTV",
-    }
+    sources = await _pick_sources(query)
 
     async def _safe_fetch(name, coro):
         try:
             results = await coro
             if results:
                 log.info("[news-agg] %s returned %d results", name, len(results))
-                # Tag each result with its source
                 for r in results:
                     r["source"] = _SOURCE_LABELS.get(name, name)
             return results or []
@@ -490,19 +515,17 @@ async def news_search_aggregated(query: str, max_per_source: int = 3) -> str:
             log.warning("[news-agg] %s failed: %s", name, e)
             return []
 
-    # Fetch all sources concurrently
-    all_results = await asyncio.gather(
-        _safe_fetch("google_news", _news_google_rss(query)),
-        _safe_fetch("hackernews", _news_hackernews(query)),
-        _safe_fetch("reuters", _news_source_rss(query, "reuters")),
-        _safe_fetch("ap", _news_source_rss(query, "ap")),
-        _safe_fetch("bbc", _news_source_rss(query, "bbc")),
-        _safe_fetch("aljazeera", _news_source_rss(query, "aljazeera")),
-        _safe_fetch("npr", _news_source_rss(query, "npr")),
-        _safe_fetch("wsj", _news_source_rss(query, "wsj")),
-        _safe_fetch("ars", _news_source_rss(query, "ars")),
-        _safe_fetch("ndtv", _news_source_rss(query, "ndtv")),
-    )
+    # Build fetch tasks based on selected sources
+    tasks = []
+    for src in sources:
+        if src == "google_news":
+            tasks.append(_safe_fetch(src, _news_google_rss(query)))
+        elif src == "hackernews":
+            tasks.append(_safe_fetch(src, _news_hackernews(query)))
+        else:
+            tasks.append(_safe_fetch(src, _news_source_rss(query, src)))
+
+    all_results = await asyncio.gather(*tasks)
 
     # Take top N from each source, deduplicate by URL
     seen_urls = set()
