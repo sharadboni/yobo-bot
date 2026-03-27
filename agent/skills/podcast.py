@@ -4,7 +4,7 @@ import logging
 from agent.tools import news_search_aggregated, web_search, read_page, wikipedia
 from agent.services.llm import chat_completion
 from agent.services.voice_store import get_active_voice
-from agent.constants import MAX_TOKENS_PODCAST_SCRIPT, MAX_WORDS_PODCAST_MONO, MAX_WORDS_PODCAST_DIALOGUE
+from agent.constants import MAX_TOKENS_PODCAST_SCRIPT, MAX_WORDS_PODCAST_MONO, MAX_WORDS_PODCAST_DIALOGUE, TEMP_PODCAST_SCRIPT
 
 log = logging.getLogger(__name__)
 
@@ -185,7 +185,7 @@ async def _generate_and_condense(
     script = await chat_completion([
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"Topic: {topic}\n\n{research}\n\nSpeak now."},
-    ], max_tokens=MAX_TOKENS_PODCAST_SCRIPT, no_think=True)
+    ], max_tokens=MAX_TOKENS_PODCAST_SCRIPT, temperature=TEMP_PODCAST_SCRIPT, no_think=True)
 
     word_count = len(script.split())
     for attempt in range(MAX_RETRIES):
@@ -195,7 +195,7 @@ async def _generate_and_condense(
         script = await chat_completion([
             {"role": "system", "content": condense_prompt_tmpl.format(max_words=max_words)},
             {"role": "user", "content": script},
-        ], max_tokens=MAX_TOKENS_PODCAST_SCRIPT, no_think=True)
+        ], max_tokens=MAX_TOKENS_PODCAST_SCRIPT, temperature=TEMP_PODCAST_SCRIPT, no_think=True)
         word_count = len(script.split())
 
     if word_count > max_words:

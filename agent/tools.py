@@ -12,7 +12,7 @@ except ImportError:
     from duckduckgo_search import DDGS
 import os
 from agent.config import SEARCH_MAX_RESULTS
-from agent.constants import MAX_TOKENS_SOURCE_PICKER
+from agent.constants import MAX_TOKENS_SOURCE_PICKER, TEMP_SOURCE_PICKER
 from agent.sanitize import sanitize_tool_output
 
 log = logging.getLogger(__name__)
@@ -477,7 +477,7 @@ async def _pick_sources(query: str) -> list[str]:
         reply = await chat_completion_fast([
             {"role": "system", "content": _SOURCE_PICKER_PROMPT},
             {"role": "user", "content": query},
-        ], max_tokens=MAX_TOKENS_SOURCE_PICKER, temperature=0)
+        ], max_tokens=MAX_TOKENS_SOURCE_PICKER, temperature=TEMP_SOURCE_PICKER)
 
         # Parse comma-separated source names
         picked = [s.strip().lower() for s in reply.split(",")]

@@ -6,6 +6,7 @@ from agent.services.llm import chat_completion
 from agent.config import get_system_prompt_tools
 from agent.constants import (
     MAX_TOKENS_SCHEDULED_NEWS, MAX_TOKENS_SCHEDULED_SEARCH, MAX_TOKENS_SCHEDULED_PODCAST,
+    TEMP_SCHEDULED, TEMP_PODCAST_SCRIPT,
 )
 from agent.skills.podcast import PODCAST_SCRIPT_PROMPT
 
@@ -28,7 +29,7 @@ async def handle_news(task: dict) -> str:
             ),
         },
     ]
-    return await chat_completion(messages, max_tokens=MAX_TOKENS_SCHEDULED_NEWS, no_think=True)
+    return await chat_completion(messages, max_tokens=MAX_TOKENS_SCHEDULED_NEWS, temperature=TEMP_SCHEDULED, no_think=True)
 
 
 async def handle_search(task: dict) -> str:
@@ -47,7 +48,7 @@ async def handle_search(task: dict) -> str:
             ),
         },
     ]
-    return await chat_completion(messages, max_tokens=MAX_TOKENS_SCHEDULED_SEARCH, no_think=True)
+    return await chat_completion(messages, max_tokens=MAX_TOKENS_SCHEDULED_SEARCH, temperature=TEMP_SCHEDULED, no_think=True)
 
 
 async def handle_podcast(task: dict) -> str:
@@ -72,4 +73,4 @@ async def handle_podcast(task: dict) -> str:
         {"role": "system", "content": PODCAST_SCRIPT_PROMPT},
         {"role": "user", "content": f"Topic: {topic}\n\n{research}\n\nWrite the podcast script now."},
     ]
-    return await chat_completion(messages, max_tokens=MAX_TOKENS_SCHEDULED_PODCAST, no_think=True)
+    return await chat_completion(messages, max_tokens=MAX_TOKENS_SCHEDULED_PODCAST, temperature=TEMP_PODCAST_SCRIPT, no_think=True)
