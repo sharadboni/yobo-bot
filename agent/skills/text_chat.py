@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 from agent.services.llm import chat_completion, chat_completion_with_tools, chat_completion_fast
-from agent.config import SYSTEM_PROMPT, MAX_HISTORY
+from agent.config import get_system_prompt, get_system_prompt_fast, get_system_prompt_tools, MAX_HISTORY
 from agent.tools import TOOLS, TOOL_EXECUTORS
 
 log = logging.getLogger(__name__)
@@ -42,23 +42,28 @@ async def _needs_tools(text: str) -> bool:
         return False
 
 
-def build_llm_messages(profile: dict, resolved_text: str) -> list[dict]:
+def _build_messages(system_prompt: str, profile: dict, resolved_text: str) -> list[dict]:
     """Build the LLM message list from profile history + current input."""
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages = [{"role": "system", "content": system_prompt}]
     for entry in profile.get("history", [])[-CONTEXT_TURNS:]:
         messages.append({"role": entry["role"], "content": entry["content"]})
     messages.append({"role": "user", "content": resolved_text})
     return messages
 
 
+# Keep for external use (e.g. task_handlers)
+def build_llm_messages(profile: dict, resolved_text: str) -> list[dict]:
+    return _build_messages(get_system_prompt(), profile, resolved_text)
+
+
 async def text_chat(state: dict) -> dict:
     profile = state.get("user_profile", {})
     resolved = state.get("resolved_text", "")
-    messages = build_llm_messages(profile, resolved)
 
     # Document inputs: skip classifier, use big model with no_think for direct processing
     if "[TOOL RESULT from document:" in resolved:
         log.info("Routing document to text model (no tools): %s", resolved[:60])
+        messages = _build_messages(get_system_prompt_tools(), profile, resolved)
         reply = await chat_completion(messages, no_think=True)
         return {"reply_text": reply}
 
@@ -66,6 +71,7 @@ async def text_chat(state: dict) -> dict:
 
     if needs:
         log.info("Routing to tool-calling model for: %s", resolved[:60])
+        messages = _build_messages(get_system_prompt_tools(), profile, resolved)
         try:
             reply = await chat_completion_with_tools(
                 messages, tools=TOOLS, tool_executor=TOOL_EXECUTORS,
@@ -73,9 +79,11 @@ async def text_chat(state: dict) -> dict:
             )
         except Exception as e:
             log.warning("Tool calling failed, falling back to fast: %s", e)
+            messages = _build_messages(get_system_prompt_fast(), profile, resolved)
             reply = await chat_completion_fast(messages)
     else:
         log.info("Routing to fast model for: %s", resolved[:60])
+        messages = _build_messages(get_system_prompt_fast(), profile, resolved)
         reply = await chat_completion_fast(messages)
 
     return {"reply_text": reply}

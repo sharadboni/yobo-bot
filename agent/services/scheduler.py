@@ -170,6 +170,7 @@ async def _execute_task(task: dict):
                 log.warning("Scheduled TTS failed: %s", e)
 
         await outbound_queue.put(reply_msg)
+        log.info("Queued scheduled result for %s (chars=%d)", task["user_jid"], len(result_text))
     except Exception as e:
         log.error("Scheduled task %s failed: %s", task["id"], e, exc_info=True)
 

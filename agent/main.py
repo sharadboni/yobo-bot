@@ -100,6 +100,12 @@ async def handle_message(send_fn, payload: dict):
             reply_msg["content"]["audio_mimetype"] = result.get("reply_audio_mimetype", "audio/ogg")
         await send_fn(reply_msg)
 
+    # Clear typing indicator
+    try:
+        await send_fn({"type": "typing_stop", "to": sender})
+    except Exception:
+        pass
+
     log.info("Pipeline result: intent=%s content_type=%s has_audio=%s",
              result.get("intent"), result.get("content_type"), bool(result.get("reply_audio")))
 
@@ -146,8 +152,10 @@ async def main():
                 async def drain_queue():
                     while True:
                         msg = await outbound_queue.get()
+                        log.info("Draining scheduled message: type=%s to=%s", msg.get("type"), msg.get("to"))
                         try:
                             await send_fn(msg)
+                            log.info("Scheduled message sent to %s", msg.get("to"))
                         except Exception as e:
                             log.warning("Failed to send scheduled message: %s", e)
 

@@ -44,8 +44,9 @@ TOOLS = [
             "name": "web_search",
             "description": (
                 "Search the web and return a list of results with titles, snippets, and URLs. "
-                "Use this for questions about weather, news, prices, current events, or anything "
-                "that needs up-to-date data. If the snippets don't contain enough information, "
+                "Use this for questions about prices, current events, or anything "
+                "that needs up-to-date data. Do NOT use this for weather — use the weather tool instead. "
+                "If the snippets don't contain enough information, "
                 "use read_page to visit the most promising URLs."
             ),
             "parameters": {
@@ -120,6 +121,35 @@ TOOLS = [
                     },
                 },
                 "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "weather",
+            "description": (
+                "Get weather forecast for a location. Use this for ANY weather-related question. "
+                "Supports forecasts up to 16 days ahead. You can specify a date range. "
+                "Returns daily high/low temperatures, precipitation, and conditions."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "City name (e.g. 'Madrid', 'New York', 'Tokyo')",
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start date in YYYY-MM-DD format. Defaults to today if omitted.",
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "End date in YYYY-MM-DD format. Defaults to start_date + 3 days if omitted.",
+                    },
+                },
+                "required": ["location"],
             },
         },
     },
@@ -577,9 +607,86 @@ async def read_page(url: str) -> str:
 
 
 # Map tool names to executor functions
+_WEATHER_CODES = {
+    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Foggy", 48: "Rime fog",
+    51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle",
+    61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
+    71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow",
+    80: "Slight rain showers", 81: "Moderate rain showers", 82: "Violent rain showers",
+    85: "Slight snow showers", 86: "Heavy snow showers",
+    95: "Thunderstorm", 96: "Thunderstorm with slight hail", 99: "Thunderstorm with heavy hail",
+}
+
+
+async def weather(location: str, start_date: str = "", end_date: str = "") -> str:
+    """Get weather forecast from Open-Meteo (free, no API key)."""
+    from datetime import date, timedelta
+
+    # Geocode the location
+    async with httpx.AsyncClient(timeout=10) as client:
+        geo_resp = await client.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": location, "count": 1, "language": "en"},
+        )
+        geo_resp.raise_for_status()
+        results = geo_resp.json().get("results", [])
+        if not results:
+            return f"Location '{location}' not found."
+
+        place = results[0]
+        lat = place["latitude"]
+        lon = place["longitude"]
+        name = place.get("name", location)
+        country = place.get("country", "")
+        tz = place.get("timezone", "auto")
+
+        # Default dates
+        if not start_date:
+            start_date = date.today().isoformat()
+        if not end_date:
+            end_date = (date.fromisoformat(start_date) + timedelta(days=3)).isoformat()
+
+        # Fetch forecast
+        forecast_resp = await client.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "start_date": start_date,
+                "end_date": end_date,
+                "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode",
+                "timezone": tz,
+            },
+        )
+        forecast_resp.raise_for_status()
+        data = forecast_resp.json()
+
+    daily = data.get("daily", {})
+    dates = daily.get("time", [])
+    highs = daily.get("temperature_2m_max", [])
+    lows = daily.get("temperature_2m_min", [])
+    precip = daily.get("precipitation_sum", [])
+    codes = daily.get("weathercode", [])
+
+    if not dates:
+        return f"No forecast data available for {name} ({start_date} to {end_date})."
+
+    lines = [f"Weather forecast for {name}, {country}:"]
+    for i, d in enumerate(dates):
+        condition = _WEATHER_CODES.get(codes[i], "Unknown") if i < len(codes) else ""
+        hi = f"{highs[i]}°C" if i < len(highs) else "?"
+        lo = f"{lows[i]}°C" if i < len(lows) else "?"
+        rain = f"{precip[i]}mm" if i < len(precip) and precip[i] > 0 else "no rain"
+        lines.append(f"{d}: {condition}, {hi}/{lo}, {rain}")
+
+    return "\n".join(lines)
+
+
 TOOL_EXECUTORS = {
     "web_search": web_search,
     "news_search": news_search,
     "wikipedia": wikipedia,
     "read_page": read_page,
+    "weather": weather,
 }

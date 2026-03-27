@@ -65,6 +65,15 @@ async function main() {
             return;
         }
 
+        // Stop typing indicator
+        if (msg.type === 'typing_stop') {
+            try {
+                const to = msg.to || normalizeJid(config.adminJid);
+                await wa.sendPresenceUpdate('paused', to);
+            } catch (e) { /* ignore */ }
+            return;
+        }
+
         let to, text;
 
         if (msg.type === 'admin_notify') {

@@ -20,11 +20,15 @@ def _get_providers(capability: str) -> list[dict]:
 
 
 def _strip_think(text: str) -> str:
-    """Strip <think>...</think> blocks from model output, including incomplete ones."""
+    """Strip <think>...</think> blocks and stray tags from model output."""
     # Complete <think>...</think> blocks
-    result = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
-    # Incomplete <think> block (truncated output) — remove from <think> to end
-    result = re.sub(r"<think>.*$", "", result, flags=re.DOTALL)
+    result = re.sub(r"<think>[\s\S]*?</think>\s*", "", text)
+    # Incomplete <think> block (truncated) — remove from <think> to end
+    result = re.sub(r"<think>[\s\S]*$", "", result)
+    # Stray closing tags (e.g. model outputs just "</think>" at the start)
+    result = re.sub(r"</think>\s*", "", result)
+    # Variations: <|think|>, etc.
+    result = re.sub(r"<\|?/?think\|?>\s*", "", result)
     return result.strip() or text.strip()
 
 
@@ -64,10 +68,31 @@ def _extract_content(choice) -> str:
 _THINK_PREFILL = {"role": "assistant", "content": "<think>\n\n</think>\n", "prefix": True}
 
 
+def _thinking_kwargs(p: dict, no_think: bool) -> dict:
+    """Build extra kwargs for thinking mode control.
+
+    mlx-omni-server: use native thinking param. Only enable for tool calling
+    (no_think=False), disable for everything else.
+    Other providers: use the <think></think> prefill hack.
+    """
+    if p.get("type") == "mlx_omni" or "8765" in p.get("base_url", ""):
+        return {"extra_body": {"thinking": False}, "use_prefill": False}
+    return {"extra_body": {}, "use_prefill": no_think}
+
+
+def _thinking_kwargs_tools(p: dict) -> dict:
+    """Thinking kwargs for tool-calling requests. Thinking ON so the model
+    reasons about which tools to call (without it, it often skips tools entirely).
+    """
+    if p.get("type") == "mlx_omni" or "8765" in p.get("base_url", ""):
+        return {"extra_body": {"thinking": True}}
+    return {"extra_body": {}}
+
+
 async def chat_completion(messages: list[dict], **overrides) -> str:
     """Text completion with fallback.
 
-    Set no_think=True to disable thinking mode via assistant prefill.
+    Set no_think=True to disable thinking mode.
     """
     no_think = overrides.pop("no_think", False)
     last_err = None
@@ -75,13 +100,15 @@ async def chat_completion(messages: list[dict], **overrides) -> str:
         try:
             client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=180.0)
             msgs = list(messages)
-            if no_think:
+            tk = _thinking_kwargs(p, no_think)
+            if tk["use_prefill"]:
                 msgs.append(_THINK_PREFILL)
             resp = await client.chat.completions.create(
                 model=p["model"],
                 messages=msgs,
                 max_tokens=overrides.get("max_tokens", p["max_tokens"]),
                 temperature=overrides.get("temperature", p["temperature"]),
+                extra_body=tk["extra_body"] or openai.NOT_GIVEN,
             )
             return _extract_content(resp.choices[0])
         except Exception as e:
@@ -99,12 +126,16 @@ async def chat_completion_fast(messages: list[dict], **overrides) -> str:
     for p in providers:
         try:
             client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=60.0)
-            msgs = list(messages) + [_THINK_PREFILL]
+            msgs = list(messages)
+            tk = _thinking_kwargs(p, True)  # fast model always no_think
+            if tk["use_prefill"]:
+                msgs.append(_THINK_PREFILL)
             resp = await client.chat.completions.create(
                 model=p["model"],
                 messages=msgs,
                 max_tokens=overrides.get("max_tokens", p.get("max_tokens", 256)),
                 temperature=overrides.get("temperature", p.get("temperature", 0.5)),
+                extra_body=tk["extra_body"] or openai.NOT_GIVEN,
             )
             return _extract_content(resp.choices[0])
         except Exception as e:
@@ -133,6 +164,7 @@ async def chat_completion_with_tools(
         try:
             client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=180.0)
             msgs = list(messages)
+            tk = _thinking_kwargs_tools(p)
 
             for round_num in range(max_rounds):
                 resp = await client.chat.completions.create(
@@ -141,6 +173,7 @@ async def chat_completion_with_tools(
                     tools=tools,
                     max_tokens=overrides.get("max_tokens", p["max_tokens"]),
                     temperature=overrides.get("temperature", p["temperature"]),
+                    extra_body=tk["extra_body"] or openai.NOT_GIVEN,
                 )
                 choice = resp.choices[0]
 

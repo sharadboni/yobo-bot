@@ -200,20 +200,37 @@ load_user -> resolve_input -> classify_intent -> execute_skill -> tts -> save_us
 
 ### Smart Routing
 
+Every message is routed to the right model based on what it needs:
+
 ```
 User message
   │
   ▼
 Classifier (fast model, 1 token) — "Does this need a lookup?"
   │
-  ├── No  → Fast model (direct reply, ~2-5s)
+  ├── No  → Fast model (4B, short reply, ~2-5s)
   │
-  └── Yes → Tool-calling model (web search, news, Wikipedia, ~10-30s)
+  └── Yes → Big model (9B) + tools (news, search, weather, wiki, ~10-60s)
 ```
 
-The classifier errs on the side of searching — company info, funding rounds, specific facts all trigger a lookup. Simple greetings, math, and coding questions skip straight to the fast model.
+**Full routing table:**
 
-Documents skip the classifier entirely and go to the full model for processing.
+| Input | Classifier | Model | Thinking | Prompt style |
+|---|---|---|---|---|
+| Simple chat ("Hi", jokes, coding) | yes → no | Fast (4B) | off | Short (2-3 sentences) |
+| Needs lookup (news, weather, companies) | yes → yes | Big (9B) + tools | on | Detailed (complete lists) |
+| Document with caption | skipped | Big (9B), no tools | off | Detailed |
+| `/search <query>` | skipped | Big (9B) | off | Direct search |
+| `/podcast <topic>` | skipped | Big (9B) | off | Script generation |
+| Scheduled news/search | skipped | Big (9B) | off | Task handler |
+| Voice note | STT first | then classifier as above | — | — |
+| Image with caption | Vision first | then classifier as above | — | — |
+
+**When the classifier runs:** Only for free-text messages (not `/commands`, documents, or direct skills). It asks the fast model "does this need a lookup?" and gets yes/no in ~1 second. It errs on the side of yes — company info, funding rounds, specific facts all trigger a lookup.
+
+**Thinking mode:** Only enabled for tool-calling requests so the model reasons about which tools to use. Disabled everywhere else for faster responses. The server strips thinking content before returning.
+
+**System prompts:** The fast model gets "keep it to 2-3 sentences." The tool-calling model gets "give complete answers, summarize in your own words, never fabricate data."
 
 ### News Aggregation
 
