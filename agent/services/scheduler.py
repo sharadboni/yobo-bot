@@ -8,6 +8,7 @@ import time
 import logging
 from datetime import datetime, timedelta
 from uuid import uuid4
+from agent.sanitize import sanitize_llm_output, markdown_to_whatsapp
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +29,6 @@ def register_handler(task_type: str, handler):
 def _user_schedule_path(user_jid: str) -> str:
     """Per-user schedule file: data/schedules/<number>.json"""
     from agent.jid import jid_to_number
-from agent.sanitize import sanitize_llm_output, markdown_to_whatsapp
     os.makedirs(SCHEDULES_DIR, exist_ok=True)
     return os.path.join(SCHEDULES_DIR, f"{jid_to_number(user_jid)}.json")
 
