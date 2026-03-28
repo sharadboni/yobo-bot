@@ -111,6 +111,7 @@ Scheduled tasks use the same research pipeline as live requests — aggregated n
 
 | Command | Description |
 |---|---|
+| `/say <text>` | Convert text to speech (no LLM, direct TTS) |
 | `/voice` | Show your current voice |
 | `/voice list` | Browse 50+ voices |
 | `/voice set <name>` | Switch voice (underscores optional: `afheart` = `af_heart`) |

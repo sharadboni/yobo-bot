@@ -15,6 +15,7 @@ SKILL_MAP = {
     "/unschedule": "schedule_remove",
     "/voice": "voice",
     "/v": "voice",
+    "/say": "say",
     "/help": "help",
 }
 

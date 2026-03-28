@@ -22,22 +22,34 @@ no brackets, no parenthetical notes, no speaker labels, no stage directions.
 - Output ONLY the spoken words. Nothing else before or after.
 """
 
-DIALOGUE_SCRIPT_PROMPT = """\
-You are writing a short 2-person podcast dialogue between HOST and GUEST about the \
-topic below, based on the research material provided.
+def _build_dialogue_prompt(host_name: str, guest_name: str, host_gender: str, guest_gender: str) -> str:
+    """Build a dialogue script prompt with character names and dynamic pairing."""
+    # Describe the pairing
+    if host_gender == guest_gender == "female":
+        dynamic = f"{host_name} and {guest_name} are two sharp women with great chemistry."
+    elif host_gender == guest_gender == "male":
+        dynamic = f"{host_name} and {guest_name} are two guys who riff off each other naturally."
+    elif host_gender == "female" and guest_gender == "male":
+        dynamic = f"{host_name} leads the conversation with curiosity, {guest_name} brings depth and analysis."
+    elif host_gender == "male" and guest_gender == "female":
+        dynamic = f"{host_name} sets up the topics, {guest_name} brings sharp insights and pushback."
+    else:
+        dynamic = f"{host_name} drives the conversation, {guest_name} provides expert commentary."
 
-Rules:
-- Write natural, conversational dialogue. Each line must start with exactly \
-"HOST:" or "GUEST:" followed by their spoken words.
-- HOST drives the conversation with questions and transitions. \
-GUEST provides insights and interesting takes.
-- Use contractions, reactions ("Right!", "Exactly", "That's wild"), and natural back-and-forth.
-- STRICT LENGTH: Maximum 700 words total. This is absolutely critical.
-- Start with HOST introducing the topic, end with a quick wrap-up.
-- FORBIDDEN: No asterisks, no bold, no bullet points, no headers, no markdown, \
-no brackets, no parenthetical notes, no stage directions.
-- Output ONLY the dialogue lines. Nothing else before or after.
-"""
+    return (
+        f"You are writing a podcast dialogue between {host_name} (HOST) and {guest_name} (GUEST). "
+        f"{dynamic}\n\n"
+        "Rules:\n"
+        f"- Each line must start with exactly \"HOST:\" or \"GUEST:\" followed by spoken words.\n"
+        f"- {host_name} (HOST) drives with questions and transitions. "
+        f"{guest_name} (GUEST) provides insights and interesting takes.\n"
+        "- Use contractions, reactions (\"Right!\", \"Exactly\", \"That's wild\"), and natural back-and-forth.\n"
+        f"- STRICT LENGTH: Maximum {MAX_WORDS_DIALOGUE} words total. This is absolutely critical.\n"
+        f"- Start with HOST introducing the topic by name, end with a quick wrap-up.\n"
+        "- FORBIDDEN: No asterisks, no bold, no bullet points, no headers, no markdown, "
+        "no brackets, no parenthetical notes, no stage directions.\n"
+        "- Output ONLY the dialogue lines. Nothing else before or after."
+    )
 
 CONDENSE_PROMPT = """\
 The following podcast script is too long. Condense it to under {max_words} words while \
@@ -70,18 +82,50 @@ _CONTRAST_VOICES = {
 }
 _DEFAULT_GUEST = "am_fenrir"
 
+# Character names for dialogue based on voice
+_VOICE_CHARACTERS = {
+    # American female
+    "af_heart": "Sarah", "af_bella": "Bella", "af_nova": "Nova", "af_sky": "Sky",
+    # American male
+    "am_adam": "Adam", "am_echo": "Echo", "am_eric": "Eric", "am_fenrir": "Finn",
+    "am_liam": "Liam", "am_michael": "Mike", "am_onyx": "Onyx", "am_puck": "Puck",
+    # British
+    "bf_alice": "Alice", "bf_emma": "Emma",
+    "bm_daniel": "Daniel", "bm_fable": "Fable", "bm_george": "George", "bm_lewis": "Lewis",
+    # Spanish
+    "ef_dora": "Dora", "em_alex": "Alex", "em_santa": "Santiago",
+    # Hindi
+    "hf_alpha": "Priya", "hf_beta": "Ananya", "hm_omega": "Arjun", "hm_psi": "Rohan",
+}
+
+
+def _get_character_name(voice_name: str) -> str:
+    """Get a character name for a voice. Custom voices use their own name."""
+    if voice_name in _VOICE_CHARACTERS:
+        return _VOICE_CHARACTERS[voice_name]
+    # Custom/cloned voice — use the voice name itself, capitalized
+    return voice_name.replace("_", " ").title()
+
+
+def _get_voice_gender(voice_name: str) -> str:
+    """Detect gender from voice naming convention (xf_ = female, xm_ = male)."""
+    if len(voice_name) >= 2 and voice_name[1] == "f":
+        return "female"
+    if len(voice_name) >= 2 and voice_name[1] == "m":
+        return "male"
+    return "unknown"
+
 
 def _pick_guest_voice(host_voice_name: str) -> str:
     """Pick a contrasting guest voice based on the host voice."""
     if host_voice_name in _CONTRAST_VOICES:
         return _CONTRAST_VOICES[host_voice_name]
     # For custom/cloned voices or unknown builtins, guess from prefix
-    if host_voice_name and len(host_voice_name) >= 2:
-        gender = host_voice_name[1]  # 'f' or 'm' in the naming convention
-        if gender == "f":
-            return "am_adam"
-        elif gender == "m":
-            return "af_heart"
+    gender = _get_voice_gender(host_voice_name)
+    if gender == "female":
+        return "am_fenrir"
+    elif gender == "male":
+        return "af_heart"
     return _DEFAULT_GUEST
 
 
@@ -221,14 +265,21 @@ async def podcast(state: dict) -> dict:
         return {"reply_text": "Couldn't find information on that topic. Try again later."}
 
     if dialogue_mode:
-        script = await _generate_and_condense(
-            DIALOGUE_SCRIPT_PROMPT, topic, research,
-            MAX_WORDS_DIALOGUE, CONDENSE_DIALOGUE_PROMPT,
-        )
         user_jid = state.get("user_jid", "")
         host_voice = get_active_voice(user_jid)
         guest_voice = _pick_guest_voice(host_voice["name"])
-        log.info("[podcast] Dialogue voices: host=%s guest=%s", host_voice["name"], guest_voice)
+        host_name = _get_character_name(host_voice["name"])
+        guest_name = _get_character_name(guest_voice)
+        host_gender = _get_voice_gender(host_voice["name"])
+        guest_gender = _get_voice_gender(guest_voice)
+        log.info("[podcast] Dialogue: host=%s(%s) guest=%s(%s)",
+                 host_name, host_voice["name"], guest_name, guest_voice)
+
+        dialogue_prompt = _build_dialogue_prompt(host_name, guest_name, host_gender, guest_gender)
+        script = await _generate_and_condense(
+            dialogue_prompt, topic, research,
+            MAX_WORDS_DIALOGUE, CONDENSE_DIALOGUE_PROMPT,
+        )
         segments = _parse_dialogue(script, host_voice, guest_voice)
         if not segments:
             return {"reply_text": script, "content_type": "audio"}

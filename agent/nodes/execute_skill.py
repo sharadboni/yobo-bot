@@ -6,6 +6,7 @@ from agent.skills.web_search import web_search
 from agent.skills.podcast import podcast
 from agent.skills.schedule import schedule_add, schedule_list, schedule_remove
 from agent.skills.voice import voice_cmd
+from agent.skills.say import say
 
 log = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ SKILLS = {
     "schedule_list": schedule_list,
     "schedule_remove": schedule_remove,
     "voice": voice_cmd,
+    "say": say,
 }
 
 
@@ -52,6 +54,7 @@ async def execute_skill_node(state: dict) -> dict:
                 "/schedules to see yours, /unschedule <id> to remove\n\n"
 
                 "*Voice & TTS*\n"
+                "/say Hello world — convert text to speech\n"
                 "/voice list — browse 50+ voices\n"
                 "/voice set af bella — change your voice\n"
                 "/voice add myvoice Hello this is my voice\n"
