@@ -28,4 +28,7 @@ class AgentState(TypedDict):
     reply_audio: str          # base64-encoded audio (TTS)
     reply_audio_mimetype: str # mimetype of reply audio
     dialogue_segments: list[dict]  # multi-voice TTS segments [{voice, text}, ...]
+    audio_only: bool          # if True, send only audio (no text transcript)
+    force_audio: bool         # if True, generate TTS even for text responses
+    scheduled: bool           # if True, this is a scheduled task (not user-initiated)
     outbound: list[dict]      # messages to send via WS

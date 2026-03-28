@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 from agent.skills.text_chat import text_chat
+from agent.skills.news import news as news_skill
 from agent.skills.web_search import web_search
 from agent.skills.podcast import podcast
 from agent.skills.schedule import schedule_add, schedule_list, schedule_remove
@@ -12,6 +13,7 @@ log = logging.getLogger(__name__)
 
 SKILLS = {
     "text_chat": text_chat,
+    "news": news_skill,
     "web_search": web_search,
     "podcast": podcast,
     "schedule_add": schedule_add,
@@ -39,7 +41,8 @@ async def execute_skill_node(state: dict) -> dict:
 
                 "---\n\n"
 
-                "*Web Search*\n"
+                "*Chat & Search*\n"
+                "/news AI technology — get a news briefing\n"
                 "/search weather in Boston\n"
                 "/s latest iPhone price\n\n"
 

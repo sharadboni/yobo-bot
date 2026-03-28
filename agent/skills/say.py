@@ -6,4 +6,4 @@ async def say(state: dict) -> dict:
     text = state.get("intent_args", "").strip()
     if not text:
         return {"reply_text": "Usage: /say <text to speak>"}
-    return {"reply_text": text, "content_type": "audio"}
+    return {"reply_text": text, "content_type": "audio", "audio_only": True}

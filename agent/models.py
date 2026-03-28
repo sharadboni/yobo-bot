@@ -4,10 +4,11 @@ import time
 from typing import TypedDict
 
 
-class HistoryEntry(TypedDict):
+class HistoryEntry(TypedDict, total=False):
     role: str        # "user" or "assistant"
     content: str
     ts: float
+    meta: dict       # optional metadata: {"sources": [...], "urls": [...], "topic": "..."}
 
 
 class UserProfile(TypedDict):

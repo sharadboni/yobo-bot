@@ -8,7 +8,6 @@ import time
 import logging
 from datetime import datetime, timedelta
 from uuid import uuid4
-from agent.sanitize import sanitize_llm_output, markdown_to_whatsapp
 
 log = logging.getLogger(__name__)
 
@@ -17,8 +16,8 @@ SCHEDULES_DIR = os.getenv("SCHEDULES_DIR", "data/schedules")
 # Task type → async handler, registered at startup
 _task_handlers: dict = {}
 
-# Outbound message queue — scheduler pushes, main.py drains and sends
-outbound_queue: asyncio.Queue = asyncio.Queue()
+# Message queue — scheduler pushes synthetic messages, main.py runs them through the pipeline
+message_queue: asyncio.Queue = asyncio.Queue()
 
 
 def register_handler(task_type: str, handler):
@@ -139,7 +138,7 @@ def _is_due(task: dict, now: datetime) -> bool:
 
 
 async def _execute_task(task: dict):
-    """Execute a scheduled task and send results to the user."""
+    """Execute a scheduled task by pushing a synthetic message through the pipeline."""
     task_type = task["task_type"]
     handler = _task_handlers.get(task_type)
     if not handler:
@@ -149,30 +148,16 @@ async def _execute_task(task: dict):
     try:
         log.info("Executing scheduled task %s (%s) for %s",
                  task["id"], task_type, task["user_jid"])
-        result_text = await handler(task)
-        if not result_text:
+        # Handler returns a synthetic message payload
+        payload = await handler(task)
+        if not payload:
             return
 
-        clean_text = markdown_to_whatsapp(sanitize_llm_output(result_text, user_jid=task["user_jid"]))
-        reply_msg = {
-            "type": "reply",
-            "to": task["user_jid"],
-            "content": {"text": f"Scheduled update — {task['task_args']}:\n\n{clean_text}"},
-        }
-
-        # Generate audio if requested
-        if task.get("audio"):
-            try:
-                from agent.services.llm import synthesize_speech
-                import base64
-                audio_bytes, mimetype = await synthesize_speech(result_text)
-                reply_msg["content"]["audio"] = base64.b64encode(audio_bytes).decode()
-                reply_msg["content"]["audio_mimetype"] = mimetype
-            except Exception as e:
-                log.warning("Scheduled TTS failed: %s", e)
-
-        await outbound_queue.put(reply_msg)
-        log.info("Queued scheduled result for %s (chars=%d)", task["user_jid"], len(result_text))
+        # Push through the pipeline via the message queue
+        # The pipeline handles: classify → tool calling → TTS → history → send
+        await message_queue.put(payload)
+        log.info("Queued scheduled task %s as pipeline message for %s",
+                 task["id"], task["user_jid"])
     except Exception as e:
         log.error("Scheduled task %s failed: %s", task["id"], e, exc_info=True)
 

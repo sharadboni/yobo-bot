@@ -69,26 +69,16 @@ def _extract_content(choice) -> str:
 _THINK_PREFILL = {"role": "assistant", "content": "<think>\n\n</think>\n", "prefix": True}
 
 
-def _thinking_kwargs(p: dict, no_think: bool) -> dict:
+def _build_thinking_kwargs(p: dict, no_think: bool = False, allow_prefill: bool = True) -> dict:
     """Build extra kwargs for thinking mode control.
 
-    mlx-omni-server: use native thinking param. Only enable for tool calling
-    (no_think=False), disable for everything else.
-    Other providers: use the <think></think> prefill hack.
+    mlx-omni-server: always thinking=false via extra_body.
+    Other providers: use <think></think> prefill hack when no_think=True and allow_prefill=True.
+    allow_prefill=False for tool calling (prefill interferes with tool call format).
     """
     if p.get("type") == "mlx_omni" or "8765" in p.get("base_url", ""):
         return {"extra_body": {"thinking": False}, "use_prefill": False}
-    return {"extra_body": {}, "use_prefill": no_think}
-
-
-def _thinking_kwargs_tools(p: dict) -> dict:
-    """Thinking kwargs for tool-calling requests.
-    Thinking OFF — thinking=true causes timeouts on local 9B models.
-    The system prompt instructs the model to always use tools for current data.
-    """
-    if p.get("type") == "mlx_omni" or "8765" in p.get("base_url", ""):
-        return {"extra_body": {"thinking": False}}
-    return {"extra_body": {}}
+    return {"extra_body": {}, "use_prefill": no_think and allow_prefill}
 
 
 async def chat_completion(messages: list[dict], **overrides) -> str:
@@ -102,7 +92,7 @@ async def chat_completion(messages: list[dict], **overrides) -> str:
         try:
             client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=180.0)
             msgs = list(messages)
-            tk = _thinking_kwargs(p, no_think)
+            tk = _build_thinking_kwargs(p, no_think=no_think)
             if tk["use_prefill"]:
                 msgs.append(_THINK_PREFILL)
             resp = await client.chat.completions.create(
@@ -129,7 +119,7 @@ async def chat_completion_fast(messages: list[dict], **overrides) -> str:
         try:
             client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=60.0)
             msgs = list(messages)
-            tk = _thinking_kwargs(p, True)  # fast model always no_think
+            tk = _build_thinking_kwargs(p, no_think=True)
             if tk["use_prefill"]:
                 msgs.append(_THINK_PREFILL)
             resp = await client.chat.completions.create(
@@ -166,7 +156,7 @@ async def chat_completion_with_tools(
         try:
             client = openai.AsyncOpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=180.0)
             msgs = list(messages)
-            tk = _thinking_kwargs_tools(p)
+            tk = _build_thinking_kwargs(p, no_think=True, allow_prefill=False)
 
             # Cap max_tokens for tool-calling rounds to prevent runaway thinking.
             # The model only needs to decide which tool to call (~500 tokens),

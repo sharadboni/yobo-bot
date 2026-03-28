@@ -76,9 +76,6 @@ def get_system_prompt_document() -> str:
 def get_system_prompt() -> str:
     return get_system_prompt_tools()
 
-
-SYSTEM_PROMPT = get_system_prompt()
-
 # --- LLM config ---
 
 _ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")

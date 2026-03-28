@@ -27,7 +27,7 @@ async def tts_node(state: dict) -> dict:
         return {}
     if intent.startswith("__"):
         return {}
-    if content_type not in ("audio", "dialogue") and intent != "podcast":
+    if content_type not in ("audio", "dialogue") and intent != "podcast" and not state.get("force_audio"):
         return {}
 
     try:

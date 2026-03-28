@@ -449,8 +449,10 @@ _SOURCE_LABELS = {
 }
 
 _SOURCE_PICKER_PROMPT = (
-    "You are a news source selector. Given a query, pick the 3-4 most relevant "
-    "sources from this list:\n\n"
+    "You are a news source selector. Given a query, pick the most relevant sources.\n"
+    "For broad queries (world news, top news, latest headlines), pick 6-8 sources for diversity.\n"
+    "For specific topics, pick 3-4 focused sources.\n\n"
+    "Available sources:\n"
     "hackernews — tech, startups, AI, programming\n"
     "reuters — breaking news, wire service, factual\n"
     "ap — US news, politics, general\n"
@@ -460,8 +462,9 @@ _SOURCE_PICKER_PROMPT = (
     "wsj — business, finance, markets, economy\n"
     "ars — tech deep dives, science, space\n"
     "ndtv — India, South Asia, cricket\n\n"
-    "Output ONLY the source names separated by commas. Nothing else.\n"
-    "Example: hackernews, ars, reuters"
+    "Output ONLY source names separated by commas. Nothing else.\n"
+    "Example broad: reuters, ap, bbc, aljazeera, npr, wsj, hackernews, ndtv\n"
+    "Example specific: hackernews, ars, reuters"
 )
 
 # Always included
@@ -486,7 +489,7 @@ async def _pick_sources(query: str) -> list[str]:
         if not valid:
             valid = list(_DEFAULT_EXTRAS)
 
-        selected = list(_BASE_SOURCES) + valid[:4]
+        selected = list(_BASE_SOURCES) + valid[:8]
         log.info("[news] LLM picked sources for %r: %s", query[:40], selected)
         return selected
     except Exception as e:

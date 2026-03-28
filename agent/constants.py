@@ -8,7 +8,6 @@ TEMP_TOOL_CALLING = 0.5       # focused tool decisions
 TEMP_TOOL_ANSWER = 0.7        # natural final answers
 TEMP_PODCAST_SCRIPT = 0.85    # creative, engaging script writing
 TEMP_DOCUMENT = 0.3           # precise document analysis
-TEMP_SCHEDULED = 0.5          # balanced summaries
 
 # --- Token limits ---
 
@@ -34,11 +33,6 @@ MAX_TOKENS_DOCUMENT = 8192
 MAX_TOKENS_PODCAST_SCRIPT = 2048
 MAX_WORDS_PODCAST_MONO = 500
 MAX_WORDS_PODCAST_DIALOGUE = 1000
-
-# Scheduled task summaries
-MAX_TOKENS_SCHEDULED_NEWS = 6000
-MAX_TOKENS_SCHEDULED_SEARCH = 4096
-MAX_TOKENS_SCHEDULED_PODCAST = 2048
 
 # Document extraction
 MAX_DOC_CHARS = 200000

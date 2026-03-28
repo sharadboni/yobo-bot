@@ -6,6 +6,8 @@ log = logging.getLogger(__name__)
 
 # Slash command → skill mapping
 SKILL_MAP = {
+    "/news": "news",
+    "/n": "news",
     "/search": "web_search",
     "/s": "web_search",
     "/podcast": "podcast",

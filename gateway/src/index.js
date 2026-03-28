@@ -102,9 +102,11 @@ async function main() {
                 log.info({ to }, 'Sent voice reply');
             }
 
-            // Always send text as well
-            await sendWithRetry(() => wa.sendMessage(to, { text }));
-            log.info({ to }, 'Sent text reply');
+            // Send text unless audio_only
+            if (!msg.content?.audio_only) {
+                await sendWithRetry(() => wa.sendMessage(to, { text }));
+                log.info({ to }, 'Sent text reply');
+            }
         } catch (err) {
             log.error({ err, to }, 'Failed to send WhatsApp message after retries');
         } finally {

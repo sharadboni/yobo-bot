@@ -37,13 +37,24 @@ async def _needs_tools(text: str) -> bool:
 def _build_messages(system_prompt: str, profile: dict, resolved_text: str, include_history: bool = True) -> list[dict]:
     """Build the LLM message list from profile history + current input.
 
-    include_history=False for tool-calling paths — forces fresh data lookups
-    instead of reusing stale answers from chat history.
+    History entries with metadata get the meta injected as context
+    so the LLM can reference sources/URLs for follow-ups.
     """
     messages = [{"role": "system", "content": system_prompt}]
     if include_history:
         for entry in profile.get("history", [])[-CONTEXT_TURNS:]:
-            messages.append({"role": entry["role"], "content": entry["content"]})
+            content = entry["content"]
+            meta = entry.get("meta")
+            if meta:
+                # Inject metadata as hidden context the LLM can reference
+                parts = [content]
+                if meta.get("sources"):
+                    parts.append(f"\n[Sources: {', '.join(meta['sources'])}]")
+                if meta.get("urls"):
+                    url_list = "\n".join(f"- {u}" for u in meta["urls"])
+                    parts.append(f"\n[Reference URLs:\n{url_list}]")
+                content = "".join(parts)
+            messages.append({"role": entry["role"], "content": content})
     messages.append({"role": "user", "content": resolved_text})
     return messages
 

@@ -9,7 +9,7 @@ from agent.graph import build_graph
 from agent.admin import AdminState, handle_admin_command
 from agent.sanitize import sanitize_user_input, sanitize_llm_output, markdown_to_whatsapp
 from agent.jid import normalize_jid
-from agent.services.scheduler import run_scheduler, register_handler, outbound_queue
+from agent.services.scheduler import run_scheduler, register_handler, message_queue
 from agent.services.task_handlers import handle_news, handle_search, handle_podcast
 
 logging.basicConfig(
@@ -72,6 +72,8 @@ async def handle_message(send_fn, payload: dict):
             "reply_audio": "",
             "reply_audio_mimetype": "",
             "dialogue_segments": [],
+            "force_audio": payload.get("force_audio", False),
+            "scheduled": payload.get("scheduled", False),
             "outbound": [],
         })
     finally:
@@ -85,6 +87,9 @@ async def handle_message(send_fn, payload: dict):
 
     # Send reply
     reply = result.get("reply_text", "")
+    if payload.get("scheduled") and reply:
+        topic = payload.get("content", {}).get("text", "").lstrip("/news ").lstrip("/search ").lstrip("/podcast ")
+        reply = f"Scheduled update — {topic}:\n\n{reply}" if reply else reply
     if reply:
         reply = sanitize_llm_output(reply, user_jid=sender)
         reply = markdown_to_whatsapp(reply)
@@ -98,6 +103,8 @@ async def handle_message(send_fn, payload: dict):
         if result.get("reply_audio"):
             reply_msg["content"]["audio"] = result["reply_audio"]
             reply_msg["content"]["audio_mimetype"] = result.get("reply_audio_mimetype", "audio/ogg")
+            if result.get("audio_only"):
+                reply_msg["content"]["audio_only"] = True
         await send_fn(reply_msg)
 
     # Clear typing indicator
@@ -148,16 +155,16 @@ async def main():
                 log.info("Connected to gateway")
                 send_fn = lambda msg: _send(ws, msg)
 
-                # Drain scheduler outbound queue in background
+                # Drain scheduler message queue — run synthetic messages through the pipeline
                 async def drain_queue():
                     while True:
-                        msg = await outbound_queue.get()
-                        log.info("Draining scheduled message: type=%s to=%s", msg.get("type"), msg.get("to"))
+                        payload = await message_queue.get()
+                        log.info("Processing scheduled message for %s", payload.get("from"))
                         try:
-                            await send_fn(msg)
-                            log.info("Scheduled message sent to %s", msg.get("to"))
+                            task = asyncio.create_task(handle_message(send_fn, payload))
+                            task.add_done_callback(_on_task_done)
                         except Exception as e:
-                            log.warning("Failed to send scheduled message: %s", e)
+                            log.warning("Failed to process scheduled message: %s", e)
 
                 drain_task = asyncio.create_task(drain_queue())
 
