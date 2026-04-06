@@ -100,6 +100,18 @@ export async function startWhatsApp(bridge, log, waRef = null) {
         return '';
     }
 
+    /** Extract contextInfo from any message type (text, image, document, etc.) */
+    function getContextInfo(msg) {
+        const m = msg.message;
+        if (!m) return null;
+        return m.extendedTextMessage?.contextInfo
+            || m.imageMessage?.contextInfo
+            || m.documentMessage?.contextInfo
+            || m.documentWithCaptionMessage?.message?.documentMessage?.contextInfo
+            || m.audioMessage?.contextInfo
+            || null;
+    }
+
     /** Check if the bot should respond to a group message (resolves LIDs) */
     async function shouldRespondInGroup(msg) {
         const text = quickText(msg).trim();
@@ -107,7 +119,7 @@ export async function startWhatsApp(bridge, log, waRef = null) {
         // Slash commands always trigger the bot
         if (text.startsWith('/')) return true;
 
-        const ctx = msg.message?.extendedTextMessage?.contextInfo;
+        const ctx = getContextInfo(msg);
 
         // Check if bot is @mentioned (mentionedJid may contain LIDs)
         const mentionedJids = ctx?.mentionedJid || [];
@@ -166,15 +178,16 @@ export async function startWhatsApp(bridge, log, waRef = null) {
             const content = await extractContent(msg, log);
             if (!content) continue;
 
-            // Strip bot @mention from text in groups (may appear as LID or phone number)
-            if (isGroup && content.type === 'text' && content.text) {
-                const mentionedJids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            // Strip bot @mention from text/caption in groups (may appear as LID or phone number)
+            if (isGroup) {
+                const mentionedJids = getContextInfo(msg)?.mentionedJid || [];
                 for (const jid of mentionedJids) {
                     const resolved = await resolveJid(jid);
                     if (sameUser(resolved, config.adminJid)) {
-                        // Remove @number from text (could be LID number or phone number)
                         const mentionNum = jid.split(':')[0].split('@')[0];
-                        content.text = content.text.replace(`@${mentionNum}`, '').trim();
+                        const tag = `@${mentionNum}`;
+                        if (content.text) content.text = content.text.replace(tag, '').trim();
+                        if (content.caption) content.caption = content.caption.replace(tag, '').trim();
                         break;
                     }
                 }
