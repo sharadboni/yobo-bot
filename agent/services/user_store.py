@@ -44,9 +44,14 @@ def save_user(profile: dict) -> None:
     log.debug("Saved profile %s", profile["jid"])
 
 
-def approve_user(number: str) -> bool:
-    """Mark a user as approved. Creates profile if it doesn't exist."""
-    jid = number_to_jid(number) if "@" not in number else normalize_jid(number)
+def approve_user(identifier: str) -> bool:
+    """Mark a user/group as approved. Accepts number, user JID, or group JID."""
+    if "@g.us" in identifier:
+        jid = identifier  # group JID used as-is
+    elif "@" in identifier:
+        jid = normalize_jid(identifier)
+    else:
+        jid = number_to_jid(identifier)
     profile = load_user(jid)
     profile["approved"] = True
     profile["ignored"] = False
@@ -54,9 +59,14 @@ def approve_user(number: str) -> bool:
     return True
 
 
-def ignore_user(number: str) -> bool:
-    """Mark a user as ignored. Accepts number or JID. Returns True if found."""
-    jid = number_to_jid(number) if "@" not in number else number
+def ignore_user(identifier: str) -> bool:
+    """Mark a user/group as ignored. Accepts number, user JID, or group JID."""
+    if "@g.us" in identifier:
+        jid = identifier
+    elif "@" in identifier:
+        jid = normalize_jid(identifier)
+    else:
+        jid = number_to_jid(identifier)
     path = _user_path(jid)
     if not os.path.exists(path):
         return False

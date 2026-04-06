@@ -73,6 +73,14 @@ async def execute_skill_node(state: dict) -> dict:
 
                 "---\n\n"
 
+                "*Groups*\n"
+                "Add me to a group and I'll respond when:\n"
+                "- You @mention me\n"
+                "- You reply to one of my messages\n"
+                "- You use a /command\n\n"
+
+                "---\n\n"
+
                 "Tip: Send me a photo with a caption to ask about it, "
                 "or just say hi to get started!"
             )

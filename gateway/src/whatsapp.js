@@ -87,6 +87,45 @@ export async function startWhatsApp(bridge, log, waRef = null) {
         return jid; // fallback to LID if resolution fails
     }
 
+    /** Quick text extraction for group filtering (before full media download) */
+    function quickText(msg) {
+        const m = msg.message;
+        if (!m) return '';
+        if (m.conversation) return m.conversation;
+        if (m.extendedTextMessage?.text) return m.extendedTextMessage.text;
+        if (m.imageMessage?.caption) return m.imageMessage.caption;
+        if (m.documentMessage?.caption) return m.documentMessage.caption;
+        if (m.documentWithCaptionMessage?.message?.documentMessage?.caption)
+            return m.documentWithCaptionMessage.message.documentMessage.caption;
+        return '';
+    }
+
+    /** Check if the bot should respond to a group message (resolves LIDs) */
+    async function shouldRespondInGroup(msg) {
+        const text = quickText(msg).trim();
+
+        // Slash commands always trigger the bot
+        if (text.startsWith('/')) return true;
+
+        const ctx = msg.message?.extendedTextMessage?.contextInfo;
+
+        // Check if bot is @mentioned (mentionedJid may contain LIDs)
+        const mentionedJids = ctx?.mentionedJid || [];
+        for (const jid of mentionedJids) {
+            const resolved = await resolveJid(jid);
+            if (sameUser(resolved, config.adminJid)) return true;
+        }
+
+        // Check if replying to a bot message (participant may be a LID)
+        const quotedParticipant = ctx?.participant;
+        if (quotedParticipant) {
+            const resolved = await resolveJid(quotedParticipant);
+            if (sameUser(resolved, config.adminJid)) return true;
+        }
+
+        return false;
+    }
+
     // Inbound messages
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
@@ -95,39 +134,88 @@ export async function startWhatsApp(bridge, log, waRef = null) {
             if (!msg.message) continue;     // skip protocol messages
 
             let from = msg.key.remoteJid;
+            const isGroup = from.endsWith('@g.us');
 
-            log.info({ from, fromMe: msg.key.fromMe, adminJid: config.adminJid, participant: msg.key.participant }, 'RAW message');
+            log.info({ from, fromMe: msg.key.fromMe, adminJid: config.adminJid, participant: msg.key.participant, isGroup }, 'RAW message');
 
-            // For self-chat: compare after resolving LID
-            let isSelfChat = false;
-            if (msg.key.fromMe) {
+            // Skip bot's own messages in groups
+            if (isGroup && msg.key.fromMe) continue;
+
+            // Group filtering: only respond to mentions, commands, or replies to bot
+            if (isGroup) {
+                if (!(await shouldRespondInGroup(msg))) continue;
+            }
+
+            // For self-chat in DMs: compare after resolving LID
+            if (!isGroup && msg.key.fromMe) {
                 const resolvedFrom = await resolveJid(from);
-                isSelfChat = sameUser(resolvedFrom, config.adminJid);
+                const isSelfChat = sameUser(resolvedFrom, config.adminJid);
                 log.info({ from, resolvedFrom, adminJid: config.adminJid, isSelfChat }, 'Self-chat check');
                 if (!isSelfChat) continue; // skip non-self outgoing
             }
 
-            // Resolve LID to phone number
-            from = await resolveJid(from);
+            // Resolve sender: in groups, participant is the actual sender
+            let participant = null;
+            if (isGroup) {
+                participant = msg.key.participant ? await resolveJid(msg.key.participant) : null;
+                if (!participant) continue;  // safety: skip if no participant
+            } else {
+                from = await resolveJid(from);
+            }
 
             const content = await extractContent(msg, log);
             if (!content) continue;
 
-            log.info({ from, contentType: content.type }, 'Inbound message');
+            // Strip bot @mention from text in groups (may appear as LID or phone number)
+            if (isGroup && content.type === 'text' && content.text) {
+                const mentionedJids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+                for (const jid of mentionedJids) {
+                    const resolved = await resolveJid(jid);
+                    if (sameUser(resolved, config.adminJid)) {
+                        // Remove @number from text (could be LID number or phone number)
+                        const mentionNum = jid.split(':')[0].split('@')[0];
+                        content.text = content.text.replace(`@${mentionNum}`, '').trim();
+                        break;
+                    }
+                }
+            }
+
+            const chatJid = isGroup ? from : from;
+            log.info({ chatJid, participant, isGroup, contentType: content.type }, 'Inbound message');
 
             // Show typing indicator while processing
             try {
-                await sock.sendPresenceUpdate('composing', from);
+                await sock.sendPresenceUpdate('composing', chatJid);
             } catch (e) { /* ignore presence errors */ }
 
-            bridge.sendToAgent({
+            const payload = {
                 type: 'message',
                 id: msg.key.id || uuidv4(),
                 from,
                 pushName: msg.pushName || '',
                 timestamp: msg.messageTimestamp,
                 content,
-            });
+            };
+
+            // Add group metadata
+            if (isGroup) {
+                payload.isGroup = true;
+                payload.participant = participant;
+                // Fetch group name
+                try {
+                    const meta = await sock.groupMetadata(from);
+                    if (meta?.subject) payload.groupName = meta.subject;
+                } catch (e) { /* ignore — groupName will be absent */ }
+                // Include message key so replies can quote the original
+                payload.quotedMsgKey = {
+                    remoteJid: from,
+                    id: msg.key.id,
+                    fromMe: false,
+                    participant,
+                };
+            }
+
+            bridge.sendToAgent(payload);
         }
     });
 

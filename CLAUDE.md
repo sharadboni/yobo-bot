@@ -40,6 +40,7 @@ Node.js is installed via nvm — the Makefile uses the absolute path `$(HOME)/.n
 - **Voice discovery**: On startup the agent fetches available voices from `GET /v1/audio/voices?model=kokoro|vibevoice`. Hardcoded fallbacks used if server unreachable.
 - **no_think prefill**: Qwen3 models skip reasoning when an empty `<think></think>` block is prefilled. Used for simple chat, summaries, and script generation.
 - **State propagation**: If a skill produces data needed by a downstream node (e.g. `dialogue_segments` for TTS), the field must exist in `AgentState` in `state.py`.
+- **Group chat as single identity**: In groups, the group JID (`@g.us`) is the profile identity — one shared profile, history, schedules, and voice settings per group. Individual senders are attributed in history as `[SenderName] message` for LLM context. The gateway only forwards messages that @mention the bot, reply to a bot message, or start with `/`. Approval/pending messages are suppressed in groups. Replies quote the original message. Admin `/add` and `/ignore` accept full group JIDs.
 
 ## When Adding/Changing Functionality
 

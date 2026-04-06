@@ -91,6 +91,9 @@ async function main() {
         }
 
         try {
+            // Build quote context for group replies
+            const quoted = msg.quoted ? { key: msg.quoted } : undefined;
+
             // Send audio voice note if present
             const audioB64 = msg.content?.audio;
             if (audioB64) {
@@ -98,13 +101,14 @@ async function main() {
                     audio: Buffer.from(audioB64, 'base64'),
                     mimetype: msg.content.audio_mimetype || 'audio/ogg; codecs=opus',
                     ptt: true,
-                }));
+                }, quoted ? { quoted: { key: quoted.key, message: {} } } : undefined));
                 log.info({ to }, 'Sent voice reply');
             }
 
             // Send text unless audio_only
             if (!msg.content?.audio_only) {
-                await sendWithRetry(() => wa.sendMessage(to, { text }));
+                await sendWithRetry(() => wa.sendMessage(to, { text },
+                    quoted ? { quoted: { key: quoted.key, message: {} } } : undefined));
                 log.info({ to }, 'Sent text reply');
             }
         } catch (err) {

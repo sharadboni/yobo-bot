@@ -24,6 +24,7 @@ WhatsApp <-> Gateway (Node.js/Baileys) <-> WebSocket :8765 <-> Agent (Python/Lan
 | **79 voice presets** | 54 Kokoro + 25 VibeVoice voices, set by number or name |
 | **Web search** | `/search <query>` or just ask — the bot decides when to search |
 | **News aggregation** | `/news <topic> [--from source]` — LLM picks sources or target a specific one; recency keywords filter to last 24h |
+| **Group chats** | Add the bot to a group — responds to @mentions, replies to its messages, and `/commands` |
 
 ## Quick Start
 

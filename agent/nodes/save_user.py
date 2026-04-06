@@ -21,9 +21,12 @@ def save_user_node(state: dict) -> dict:
     reply = state.get("reply_text", "")
 
     if resolved:
+        # In groups, prefix with sender name so the LLM sees who said what
+        sender_name = state.get("sender_name", "")
+        content = f"[{sender_name}] {resolved}" if state.get("is_group") and sender_name else resolved
         profile.setdefault("history", []).append({
             "role": "user",
-            "content": resolved,
+            "content": content,
             "ts": time.time(),
         })
     if reply:

@@ -8,7 +8,7 @@ from agent.config import WS_URL
 from agent.graph import build_graph
 from agent.admin import AdminState, handle_admin_command
 from agent.sanitize import sanitize_user_input, sanitize_llm_output, markdown_to_whatsapp
-from agent.jid import normalize_jid
+from agent.jid import normalize_jid, is_group_jid
 from agent.services.scheduler import run_scheduler, register_handler, message_queue
 from agent.services.task_handlers import handle_news, handle_search, handle_podcast, handle_webhook
 from agent.services.voice_store import refresh_voices
@@ -35,15 +35,33 @@ async def handle_message(send_fn, payload: dict):
     if msg_type != "message":
         return
 
-    sender = normalize_jid(payload.get("from", ""))
+    # Determine identity and group context
+    is_group = payload.get("isGroup", False)
+    sender_name = payload.get("pushName", "")
+    if is_group:
+        # Group is the profile identity; participant is just metadata
+        user_jid = payload.get("from", "")       # group JID = profile identity
+        sender_jid = normalize_jid(payload.get("participant", ""))
+        group_jid = user_jid
+        chat_jid = group_jid
+        push_name = payload.get("groupName", "")  # use group name for profile
+    else:
+        user_jid = normalize_jid(payload.get("from", ""))
+        sender_jid = user_jid
+        group_jid = ""
+        chat_jid = user_jid
+        push_name = sender_name
+
     content = payload.get("content", {})
     text = sanitize_user_input(content.get("text", ""))
 
-    log.info("Message from=%s is_admin=%s text=%r", sender, admin.is_admin(sender), text)
+    log.info("Message from=%s sender=%s group=%s is_admin=%s text=%r",
+             user_jid, f"{sender_name} ({sender_jid})" if is_group else "DM",
+             group_jid or "n/a", admin.is_admin(sender_jid), text)
 
-    # Admin commands — handled outside the pipeline
-    if admin.is_admin(sender):
-        handled = await handle_admin_command(send_fn, admin, sender, text)
+    # Admin commands — handled outside the pipeline (DMs only)
+    if not is_group and admin.is_admin(sender_jid):
+        handled = await handle_admin_command(send_fn, admin, sender_jid, text)
         if handled:
             return
 
@@ -52,7 +70,7 @@ async def handle_message(send_fn, payload: dict):
         while True:
             await asyncio.sleep(20)
             try:
-                await send_fn({"type": "typing", "to": sender})
+                await send_fn({"type": "typing", "to": chat_jid})
             except Exception:
                 break
 
@@ -61,9 +79,12 @@ async def handle_message(send_fn, payload: dict):
     try:
         result = await graph.ainvoke({
             "inbound": payload,
-            "user_jid": sender,
-            "push_name": payload.get("pushName", ""),
+            "user_jid": user_jid,
+            "push_name": push_name,
             "admin_jid": admin.admin_jid,
+            "is_group": is_group,
+            "group_jid": group_jid,
+            "sender_name": sender_name,
             "user_profile": {},
             "resolved_text": "",
             "content_type": "",
@@ -84,7 +105,7 @@ async def handle_message(send_fn, payload: dict):
     for out_msg in result.get("outbound", []):
         await send_fn(out_msg)
         if out_msg.get("type") == "admin_notify":
-            admin.track_pending(sender)
+            admin.track_pending(user_jid)
 
     # Send reply
     reply = result.get("reply_text", "")
@@ -92,14 +113,23 @@ async def handle_message(send_fn, payload: dict):
         topic = payload.get("content", {}).get("text", "").lstrip("/news ").lstrip("/search ").lstrip("/podcast ")
         reply = f"Scheduled update — {topic}:\n\n{reply}" if reply else reply
     if reply:
-        reply = sanitize_llm_output(reply, user_jid=sender)
+        reply = sanitize_llm_output(reply, user_jid=user_jid)
         reply = markdown_to_whatsapp(reply)
     if reply:
+        # In groups, prefix reply with sender's name for clarity
+        if is_group:
+            push_name = payload.get("pushName", "")
+            if push_name:
+                reply = f"@{push_name}\n{reply}"
+
         reply_msg = {
             "type": "reply",
-            "to": sender,
+            "to": chat_jid,
             "content": {"text": reply},
         }
+        # Quote the original message in group chats
+        if is_group and payload.get("quotedMsgKey"):
+            reply_msg["quoted"] = payload["quotedMsgKey"]
         # Attach TTS audio if the pipeline generated it
         if result.get("reply_audio"):
             reply_msg["content"]["audio"] = result["reply_audio"]
@@ -110,7 +140,7 @@ async def handle_message(send_fn, payload: dict):
 
     # Clear typing indicator
     try:
-        await send_fn({"type": "typing_stop", "to": sender})
+        await send_fn({"type": "typing_stop", "to": chat_jid})
     except Exception:
         pass
 

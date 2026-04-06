@@ -2,17 +2,17 @@
 from __future__ import annotations
 import logging
 from agent.services.user_store import approve_user, ignore_user
-from agent.jid import jid_to_number
+from agent.jid import jid_to_number, is_group_jid
 
 log = logging.getLogger(__name__)
 
 
 class AdminState:
-    """Tracks admin JID and last pending user number."""
+    """Tracks admin JID and last pending user/group."""
 
     def __init__(self):
         self.admin_jid: str = ""
-        self.last_pending_number: str = ""
+        self.last_pending_id: str = ""  # full JID for groups, number for users
 
     def is_admin(self, sender: str) -> bool:
         if not self.admin_jid:
@@ -22,9 +22,10 @@ class AdminState:
             or sender.split(":")[0].split("@")[0] == self.admin_jid.split(":")[0].split("@")[0]
         )
 
-    def track_pending(self, sender_jid: str) -> None:
-        """Track the last user who triggered an admin notification."""
-        self.last_pending_number = jid_to_number(sender_jid)
+    def track_pending(self, jid: str) -> None:
+        """Track the last user/group that triggered an admin notification."""
+        # Groups: store full JID. Users: store just the number.
+        self.last_pending_id = jid if is_group_jid(jid) else jid_to_number(jid)
 
 
 async def handle_admin_command(send_fn, admin: AdminState, sender: str, text: str) -> bool:
@@ -53,21 +54,24 @@ async def handle_admin_command(send_fn, admin: AdminState, sender: str, text: st
 
     if cmd.startswith("/add"):
         arg = text.strip()[4:].strip().lstrip("+")
-        number = arg if arg else admin.last_pending_number
-        if not number:
-            await send_fn({"type": "reply", "to": sender, "content": {"text": "No pending user. Use: /add <number>"}})
+        target = arg if arg else admin.last_pending_id
+        if not target:
+            await send_fn({"type": "reply", "to": sender, "content": {"text": "No pending user. Use: /add <number or group JID>"}})
             return True
-        if approve_user(number):
-            await send_fn({"type": "reply", "to": sender, "content": {"text": f"User {number} approved."}})
-            # Notify the approved user
-            user_jid = f"{number}@s.whatsapp.net"
-            await send_fn({"type": "reply", "to": user_jid, "content": {"text": (
-                "You've been approved! Send /help to see what I can do."
+        if approve_user(target):
+            is_grp = is_group_jid(target) or "@g.us" in target
+            label = f"Group {target}" if is_grp else f"User {target}"
+            await send_fn({"type": "reply", "to": sender, "content": {"text": f"{label} approved."}})
+            # Notify the approved user/group
+            notify_jid = target if is_grp else f"{target}@s.whatsapp.net"
+            await send_fn({"type": "reply", "to": notify_jid, "content": {"text": (
+                "This group has been approved! Send /help to see what I can do." if is_grp
+                else "You've been approved! Send /help to see what I can do."
             )}})
-            if number == admin.last_pending_number:
-                admin.last_pending_number = ""
+            if target == admin.last_pending_id:
+                admin.last_pending_id = ""
         else:
-            await send_fn({"type": "reply", "to": sender, "content": {"text": f"User {number} not found."}})
+            await send_fn({"type": "reply", "to": sender, "content": {"text": f"{target} not found."}})
         return True
 
     if cmd == "/clear" or cmd.startswith("/clear "):
@@ -78,16 +82,16 @@ async def handle_admin_command(send_fn, admin: AdminState, sender: str, text: st
 
     if cmd.startswith("/ignore"):
         arg = text.strip()[7:].strip().lstrip("+")
-        number = arg if arg else admin.last_pending_number
-        if not number:
-            await send_fn({"type": "reply", "to": sender, "content": {"text": "No pending user. Use: /ignore <number>"}})
+        target = arg if arg else admin.last_pending_id
+        if not target:
+            await send_fn({"type": "reply", "to": sender, "content": {"text": "No pending user. Use: /ignore <number or group JID>"}})
             return True
-        if ignore_user(number):
-            await send_fn({"type": "reply", "to": sender, "content": {"text": f"User {number} will be ignored."}})
-            if number == admin.last_pending_number:
-                admin.last_pending_number = ""
+        if ignore_user(target):
+            await send_fn({"type": "reply", "to": sender, "content": {"text": f"{target} will be ignored."}})
+            if target == admin.last_pending_id:
+                admin.last_pending_id = ""
         else:
-            await send_fn({"type": "reply", "to": sender, "content": {"text": f"User {number} not found."}})
+            await send_fn({"type": "reply", "to": sender, "content": {"text": f"{target} not found."}})
         return True
 
     return False
