@@ -1,6 +1,7 @@
 """Scheduler task handlers — synthesize user messages for the pipeline."""
 from __future__ import annotations
 import logging
+import httpx
 
 log = logging.getLogger(__name__)
 
@@ -42,3 +43,43 @@ async def handle_podcast(task: dict) -> dict:
         f"/podcast {topic}",
         force_audio=True,  # podcasts always have audio
     )
+
+
+_CHUNK_SIZE = 4000
+
+
+def _split_text(text: str, chunk_size: int = _CHUNK_SIZE) -> list[str]:
+    """Split text into chunks, breaking at the last newline before the limit."""
+    if len(text) <= chunk_size:
+        return [text]
+    chunks = []
+    while text:
+        if len(text) <= chunk_size:
+            chunks.append(text)
+            break
+        # Find last newline within the chunk
+        cut = text.rfind("\n", 0, chunk_size)
+        if cut <= 0:
+            cut = chunk_size
+        chunks.append(text[:cut])
+        text = text[cut:].lstrip("\n")
+    return chunks
+
+
+async def handle_webhook(task: dict) -> list[dict] | dict | None:
+    """Fetch a URL and send the response as one or more messages."""
+    url = task["task_args"]
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            text = resp.text
+    except Exception as e:
+        log.warning("Webhook %s failed: %s", url, e)
+        text = f"Scheduled fetch failed: {e}"
+
+    audio = task.get("audio", False)
+    chunks = _split_text(text)
+    if len(chunks) == 1:
+        return _make_message_payload(task["user_jid"], chunks[0], force_audio=audio)
+    return [_make_message_payload(task["user_jid"], c, force_audio=audio) for c in chunks]

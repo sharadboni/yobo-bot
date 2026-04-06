@@ -29,10 +29,10 @@ MAX_TOKENS_TOOL_ANSWER = 8192
 # Document processing
 MAX_TOKENS_DOCUMENT = 8192
 
-# Podcast script generation (~3-4 mins of speech at ~150 words/min = 450-600 words)
+# Podcast script generation (~150 words/min speaking rate)
 MAX_TOKENS_PODCAST_SCRIPT = 2048
-MAX_WORDS_PODCAST_MONO = 500
-MAX_WORDS_PODCAST_DIALOGUE = 1000
+MAX_WORDS_PODCAST_MONO = 500       # ~3 min mono
+MAX_WORDS_PODCAST_DIALOGUE = 750   # ~5 min dialogue
 
 # Document extraction
 MAX_DOC_CHARS = 200000

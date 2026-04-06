@@ -372,6 +372,7 @@ async def synthesize_dialogue(
             fmt = p.get("response_format", "opus")
             payload = {
                 "segments": segments,
+                "model": "vibevoice",
                 "speed": p.get("speed", 1.0),
                 "response_format": fmt,
                 "pause_ms": pause_ms,

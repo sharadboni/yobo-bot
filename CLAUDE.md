@@ -34,8 +34,10 @@ Node.js is installed via nvm — the Makefile uses the absolute path `$(HOME)/.n
 ## Important Patterns
 
 - **WhatsApp strips underscores**: Voice names like `af_heart` arrive as `afheart`. Always normalize by stripping underscores when matching user input against known identifiers.
-- **TTS dual-model routing**: Kokoro (82M) for preset voices, Qwen3-TTS (1.7B) for voice cloning. The server auto-selects based on `ref_audio` presence. Kokoro does NOT support voice cloning.
-- **Dialogue TTS**: Multi-voice audio via `POST /v1/audio/dialogue` on mlx-omni-server. Each segment specifies its own voice. Segments with `ref_audio` route to Qwen3-TTS, others to Kokoro.
+- **TTS tri-model routing**: Kokoro (82M) for single-voice preset TTS, VibeVoice (0.5B) for multi-speaker dialogue, Qwen3-TTS (1.7B) for voice cloning. The server auto-selects based on endpoint and `ref_audio` presence.
+- **Dialogue TTS**: Multi-voice audio via `POST /v1/audio/dialogue` on mlx-omni-server using VibeVoice. Each segment specifies its own voice. Segments with `ref_audio` route to Qwen3-TTS, preset segments use VibeVoice native batch.
+- **Two voice settings per user**: `active` (Kokoro voice for regular TTS) and `dialogue_voice` (VibeVoice for podcast dialogue). Set via `/voice set` and `/voice dialogue`.
+- **Voice discovery**: On startup the agent fetches available voices from `GET /v1/audio/voices?model=kokoro|vibevoice`. Hardcoded fallbacks used if server unreachable.
 - **no_think prefill**: Qwen3 models skip reasoning when an empty `<think></think>` block is prefilled. Used for simple chat, summaries, and script generation.
 - **State propagation**: If a skill produces data needed by a downstream node (e.g. `dialogue_segments` for TTS), the field must exist in `AgentState` in `state.py`.
 

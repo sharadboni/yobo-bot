@@ -10,7 +10,8 @@ from agent.admin import AdminState, handle_admin_command
 from agent.sanitize import sanitize_user_input, sanitize_llm_output, markdown_to_whatsapp
 from agent.jid import normalize_jid
 from agent.services.scheduler import run_scheduler, register_handler, message_queue
-from agent.services.task_handlers import handle_news, handle_search, handle_podcast
+from agent.services.task_handlers import handle_news, handle_search, handle_podcast, handle_webhook
+from agent.services.voice_store import refresh_voices
 
 logging.basicConfig(
     level=logging.INFO,
@@ -141,6 +142,10 @@ async def main():
     register_handler("news", handle_news)
     register_handler("search", handle_search)
     register_handler("podcast", handle_podcast)
+    register_handler("webhook", handle_webhook)
+
+    # Fetch available voices from TTS server
+    await refresh_voices()
 
     asyncio.create_task(run_scheduler())
 

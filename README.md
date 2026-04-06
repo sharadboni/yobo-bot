@@ -17,13 +17,13 @@ WhatsApp <-> Gateway (Node.js/Baileys) <-> WebSocket :8765 <-> Agent (Python/Lan
 | **Images** | Send a photo with a caption like "What is this?" |
 | **Documents** | Send a PDF, CSV, or text file with a caption like "Summarize this" |
 | **Weather** | Ask about weather anywhere — uses Open-Meteo API with date range support |
-| **Podcasts** | `/podcast <topic>` generates a 3-4 minute researched voice-note podcast |
-| **Two-voice podcasts** | `/podcast <topic> --dialogue` creates a HOST/GUEST conversation |
+| **Podcasts** | `/podcast <topic>` generates a ~5 minute researched voice-note podcast |
+| **Two-voice podcasts** | `/podcast <topic> --duo` creates a two-voice conversation via VibeVoice |
 | **Scheduled updates** | `/schedule news daily 8am AI technology` delivers recurring digests |
 | **Voice cloning** | Clone your own voice from a 3-second sample for TTS replies |
-| **50+ voice presets** | Switch between voices with `/voice set af_bella` |
+| **79 voice presets** | 54 Kokoro + 25 VibeVoice voices, set by number or name |
 | **Web search** | `/search <query>` or just ask — the bot decides when to search |
-| **News aggregation** | LLM picks relevant sources per query from: Google News, Hacker News, Reuters, AP, BBC, Al Jazeera, NPR, WSJ, Ars Technica, NDTV |
+| **News aggregation** | `/news <topic> [--from source]` — LLM picks sources or target a specific one; recency keywords filter to last 24h |
 
 ## Quick Start
 
@@ -60,7 +60,20 @@ make start
 
 ## Commands
 
-### Chat & Search
+### News
+
+| Command | Example |
+|---|---|
+| `/news <topic>` | `/news AI technology` — 10-story briefing |
+| `/news top 3 <topic>` | `/news top 3 indian news` — specific count |
+| `/news <topic> --from <source>` | `/news AI --from hn` — single source |
+| `/news latest <topic>` | `/news latest crypto` — last 24h only |
+
+Keywords like `latest`, `recent`, `today`, `breaking` automatically filter to the last 24 hours. Results are always sorted newest-first.
+
+**Source aliases:** `hn` (Hacker News), `reuters`, `ap`, `bbc`, `aljazeera`/`aj`, `npr`, `wsj`, `ars` (Ars Technica), `ndtv`, `google`
+
+### Search
 
 | Command | Example |
 |---|---|
@@ -77,7 +90,7 @@ Or just ask naturally — the bot automatically searches when needed.
 | `/podcast <topic> --dialogue` | `/podcast space exploration --dialogue` |
 | `/p <topic>` | `/p tech news --duo` |
 
-The `--dialogue` / `--duo` flag creates a two-voice conversation. HOST uses your active voice, GUEST is automatically picked as a contrasting voice. Scripts are ~500 words (mono) or ~700 words (dialogue) for 3-4 minutes of audio.
+The `--dialogue` / `--duo` flag creates a two-voice conversation using VibeVoice. Set your host and guest with `/voice set duo`. Custom (cloned) voices work as host — segments are automatically routed to Qwen3-TTS for voice cloning. Scripts target ~500 words (mono) or ~750 words (dialogue) for ~5 minutes of audio.
 
 ### Documents
 
@@ -112,24 +125,29 @@ Scheduled tasks use the same research pipeline as live requests — aggregated n
 | Command | Description |
 |---|---|
 | `/say <text>` | Convert text to speech (no LLM, direct TTS) |
-| `/voice` | Show your current voice |
-| `/voice list` | Browse 50+ voices |
-| `/voice set <name>` | Switch voice (underscores optional: `afheart` = `af_heart`) |
+| `/voice` | Show current voices |
+| `/voice list` | Browse all voices (numbered, grouped by language) |
+| `/voice set single <#\|name>` | Set voice for regular TTS (Kokoro) |
+| `/voice set duo <host#> <guest#>` | Set both podcast dialogue voices (VibeVoice) |
+| `/voice set duo host <#\|c#\|name>` | Set just the dialogue host |
+| `/voice set duo guest <#\|name>` | Set just the dialogue guest |
 | `/voice add <name> <transcript>` | Clone a voice — then send a voice note |
-| `/voice remove <name>` | Remove a custom voice |
+| `/voice remove <name\|c#>` | Remove a custom voice |
+
+Voices are fetched from the TTS server on startup. Use numbers from `/voice list`, friendly names (e.g. `Heart`, `Emma`), or `c1`/`c2` for custom voices.
 
 **Voice cloning example:**
 ```
 /voice add myvoice Hello, this is what my voice sounds like
 # Then send a voice note saying exactly that
-# Bot saves it and uses it for all future replies
+/voice set single c1        # Use for regular TTS
+/voice set duo host c1      # Use as podcast host (voice-cloned)
 ```
 
-**Built-in voices:** American (`af_heart`, `af_bella`, `af_nova`, `af_sky`, `am_adam`, `am_echo`, `am_fenrir`, `am_michael`, `am_puck`), British (`bf_alice`, `bf_emma`, `bm_fable`, `bm_george`), Spanish, Hindi, and more.
-
-**Dual-model TTS:**
-- **Kokoro 82M** — sub-second, 50+ preset voices (default)
-- **Qwen3-TTS 1.7B** — higher quality voice cloning from 3-10s samples (automatic when a custom voice is active)
+**Tri-model TTS:**
+- **Kokoro 82M** — 54 preset voices for single-voice TTS (`/voice set single`)
+- **VibeVoice 0.5B** — 25 multi-speaker voices for podcast dialogue (`/voice set duo`)
+- **Qwen3-TTS 1.7B** — voice cloning from 3-10s samples (automatic when a custom voice is active)
 
 ### Admin Commands (self-chat only)
 
@@ -263,33 +281,37 @@ All token limits and temperatures are centralized in `agent/constants.py`:
 
 ### News Aggregation
 
-The fast model picks 3-5 relevant sources per query (Google News always included):
+The fast model picks 3-5 relevant sources per query (Google News always included), or you can target a specific source with `--from`:
 
-| Source | Specialty |
-|---|---|
-| Google News | General aggregator (always included) |
-| Hacker News | Tech, startups, AI (via Algolia API) |
-| Reuters, AP | Wire services, neutral/factual |
-| BBC, Al Jazeera | International perspectives |
-| NPR, WSJ | US politics, business/finance |
-| Ars Technica | Tech deep dives, science |
-| NDTV | India, South Asia |
+| Source | Alias | Specialty |
+|---|---|---|
+| Google News | `google` | General aggregator (always included) |
+| Hacker News | `hn` | Tech, startups, AI (via Algolia API) |
+| Reuters | `reuters` | Wire service, neutral/factual |
+| AP News | `ap` | US news, general |
+| BBC | `bbc` | International, UK, Europe |
+| Al Jazeera | `aj` | Middle East, Global South |
+| NPR | `npr` | US politics, culture, science |
+| WSJ | `wsj` | Business, finance, markets |
+| Ars Technica | `ars` | Tech deep dives, science |
+| NDTV | `ndtv` | India, South Asia |
 
-Source selection is LLM-driven: "AI funding" → HN + WSJ, "Gaza" → Al Jazeera + BBC, "India cricket" → NDTV. Each result is tagged with its source for cross-perspective synthesis.
+Source selection is LLM-driven: "AI funding" → HN + WSJ, "Gaza" → Al Jazeera + BBC, "India cricket" → NDTV. Use `--from hn` to bypass the picker and fetch from a single source.
+
+Results are always sorted newest-first. Queries with recency keywords (`latest`, `recent`, `today`, `breaking`, `current`, `new`) automatically filter to the last 24 hours via Google News `when:1d` and pubDate filtering.
 
 ### Podcast Research Pipeline
 
 Podcasts gather research from three sources concurrently, then generate a script:
 
 ```
-/podcast quantum computing
+/podcast quantum computing --duo
   ├── news_search_aggregated() ─┐
   ├── wikipedia()               ├── concurrent
   ├── web_search()             ─┘
   ├── Read top 3 page URLs (Playwright)
-  ├── Generate script (9B, temp=0.85, max 500/700 words)
-  ├── Condense if over limit (up to 2 retries)
-  └── TTS: single voice or multi-voice dialogue
+  ├── Generate script (9B, temp=0.85, ~750 words)
+  └── TTS: Kokoro (single) or VibeVoice (duo dialogue)
 ```
 
 ### Connection Resilience

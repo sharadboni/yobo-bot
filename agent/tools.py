@@ -368,50 +368,104 @@ _RSS_FEEDS = {
 }
 
 
-def _parse_rss(xml_text: str, max_items: int) -> list[dict]:
-    """Parse RSS XML into a list of results."""
+def _parse_rss(xml_text: str, max_items: int, min_content_items: int = 0,
+               max_age_hours: int = 0) -> list[dict]:
+    """Parse RSS XML into a list of results.
+
+    If min_content_items > 0, keeps parsing beyond max_items to find items
+    with meaningful descriptions (> 40 chars) until we have enough.
+    If max_age_hours > 0, skips articles older than that.
+    """
+    import re as _re
+    from email.utils import parsedate_to_datetime
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
         return []
+
+    cutoff = None
+    if max_age_hours > 0:
+        from datetime import datetime, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+
     items = root.findall(".//item")
     results = []
-    for item in items[:max_items]:
+    content_count = 0
+    for item in items:
         title = item.findtext("title", "").strip()
         link = item.findtext("link", "").strip()
         desc = item.findtext("description", "").strip()
         pub_date = item.findtext("pubDate", "").strip()
         if not title or not link:
             continue
+        # Filter by age if cutoff is set
+        if cutoff and pub_date:
+            try:
+                article_dt = parsedate_to_datetime(pub_date)
+                if article_dt < cutoff:
+                    continue
+            except Exception:
+                pass  # unparseable date — keep the article
         # Clean HTML from description
-        import re
-        desc = re.sub(r"<[^>]+>", "", desc).strip()
+        desc = _re.sub(r"<[^>]+>", "", desc).strip()
         body = f"{desc} ({pub_date})" if pub_date else desc
-        results.append({"title": title, "body": body, "url": link})
+        results.append({"title": title, "body": body, "url": link, "_pub_dt": pub_date})
+        if len(desc) > 40:
+            content_count += 1
+        # Stop when we have enough items with content
+        if len(results) >= max_items and content_count >= min_content_items:
+            break
     return results
 
 
-async def _news_google_rss(query: str) -> list[dict]:
+# Parse up to 15 items per RSS feed (feeds typically have 20-100).
+# The aggregator's max_per_source controls how many actually get used.
+_RSS_PARSE_LIMIT = 15
+
+# Keywords that signal the user wants only recent articles
+_RECENCY_KEYWORDS = {"latest", "recent", "today", "breaking", "current", "new", "now", "just"}
+
+
+def _wants_recent(query: str) -> bool:
+    """Check if the query implies the user wants only very recent articles."""
+    words = set(query.lower().split())
+    return bool(words & _RECENCY_KEYWORDS)
+
+
+async def _news_google_rss(query: str, recent: bool = False) -> list[dict]:
     """Fetch news from Google News RSS."""
-    url = _RSS_FEEDS["google_news"].format(query=quote_plus(query))
+    q = quote_plus(query)
+    # Append when:1d to restrict to last 24h on Google News
+    if recent:
+        q += "+when:1d"
+    url = _RSS_FEEDS["google_news"].format(query=q)
     async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
         resp = await client.get(url, headers={"User-Agent": _random_ua()})
         resp.raise_for_status()
-    return _parse_rss(resp.text, SEARCH_MAX_RESULTS)
+    return _parse_rss(resp.text, _RSS_PARSE_LIMIT, min_content_items=5,
+                      max_age_hours=24 if recent else 0)
 
 
-async def _news_source_rss(query: str, source: str) -> list[dict]:
+async def _news_source_rss(query: str, source: str, recent: bool = False) -> list[dict]:
     """Fetch news from a specific source via Google News RSS."""
-    url = _RSS_FEEDS[source].format(query=quote_plus(query))
+    q = quote_plus(query)
+    if recent:
+        q += "+when:1d"
+    url = _RSS_FEEDS[source].format(query=q)
     async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
         resp = await client.get(url, headers={"User-Agent": _random_ua()})
         resp.raise_for_status()
-    return _parse_rss(resp.text, SEARCH_MAX_RESULTS)
+    return _parse_rss(resp.text, _RSS_PARSE_LIMIT, min_content_items=3,
+                      max_age_hours=24 if recent else 0)
 
 
-async def _news_hackernews(query: str) -> list[dict]:
+async def _news_hackernews(query: str, recent: bool = False) -> list[dict]:
     """Fetch news from Hacker News via Algolia search API."""
     url = f"https://hn.algolia.com/api/v1/search?query={quote_plus(query)}&tags=story&hitsPerPage={SEARCH_MAX_RESULTS}"
+    if recent:
+        import time
+        ts_24h = int(time.time()) - 86400
+        url += f"&numericFilters=created_at_i>{ts_24h}"
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(url)
         resp.raise_for_status()
@@ -446,6 +500,21 @@ _SOURCE_LABELS = {
     "wsj": "Wall Street Journal",
     "ars": "Ars Technica",
     "ndtv": "NDTV",
+}
+
+# User-facing aliases → internal source keys
+SOURCE_ALIASES = {
+    # Exact keys
+    "hackernews": "hackernews", "reuters": "reuters", "ap": "ap",
+    "bbc": "bbc", "aljazeera": "aljazeera", "npr": "npr",
+    "wsj": "wsj", "ars": "ars", "ndtv": "ndtv",
+    # Friendly aliases
+    "hn": "hackernews", "hacker": "hackernews",
+    "arstechnica": "ars", "technica": "ars",
+    "apnews": "ap",
+    "jazeera": "aljazeera", "aj": "aljazeera",
+    "wallstreet": "wsj", "wallstreetjournal": "wsj",
+    "google": "google_news", "googlenews": "google_news",
 }
 
 _SOURCE_PICKER_PROMPT = (
@@ -497,15 +566,29 @@ async def _pick_sources(query: str) -> list[str]:
         return list(_BASE_SOURCES) + list(_DEFAULT_EXTRAS)
 
 
-async def news_search_aggregated(query: str, max_per_source: int = 3) -> str:
+async def news_search_aggregated(
+    query: str,
+    max_per_source: int = 3,
+    sources_override: list[str] | None = None,
+) -> str:
     """Aggregate news from topic-relevant sources concurrently.
 
     Always includes Google News + Reuters, then picks 2-4 extra sources
     based on query keywords. Deduplicates by URL.
+    If query contains recency keywords (latest, recent, today, etc.),
+    only articles from the last 24 hours are returned.
+    If sources_override is provided, skips the LLM picker and uses those sources only.
     """
     import asyncio
 
-    sources = await _pick_sources(query)
+    recent = _wants_recent(query)
+    if recent:
+        log.info("[news-agg] Recency filter ON (24h) for query: %s", query[:60])
+    if sources_override:
+        sources = sources_override
+        log.info("[news-agg] Using override sources: %s", sources)
+    else:
+        sources = await _pick_sources(query)
 
     async def _safe_fetch(name, coro):
         try:
@@ -523,11 +606,11 @@ async def news_search_aggregated(query: str, max_per_source: int = 3) -> str:
     tasks = []
     for src in sources:
         if src == "google_news":
-            tasks.append(_safe_fetch(src, _news_google_rss(query)))
+            tasks.append(_safe_fetch(src, _news_google_rss(query, recent=recent)))
         elif src == "hackernews":
-            tasks.append(_safe_fetch(src, _news_hackernews(query)))
+            tasks.append(_safe_fetch(src, _news_hackernews(query, recent=recent)))
         else:
-            tasks.append(_safe_fetch(src, _news_source_rss(query, src)))
+            tasks.append(_safe_fetch(src, _news_source_rss(query, src, recent=recent)))
 
     all_results = await asyncio.gather(*tasks)
 
@@ -543,6 +626,20 @@ async def news_search_aggregated(query: str, max_per_source: int = 3) -> str:
 
     if not combined:
         return await web_search(f"{query} latest news")
+
+    # Sort newest-first using pubDate (always favor recent articles)
+    from email.utils import parsedate_to_datetime
+    from datetime import datetime, timezone
+    def _sort_key(r):
+        try:
+            return parsedate_to_datetime(r.get("_pub_dt", ""))
+        except Exception:
+            return datetime.min.replace(tzinfo=timezone.utc)
+    combined.sort(key=_sort_key, reverse=True)
+
+    # Clean up internal field before formatting
+    for r in combined:
+        r.pop("_pub_dt", None)
 
     log.info("[news-agg] Combined %d unique results from %d sources",
              len(combined), sum(1 for r in all_results if r))

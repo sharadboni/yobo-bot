@@ -41,8 +41,11 @@ async def execute_skill_node(state: dict) -> dict:
 
                 "---\n\n"
 
-                "*Chat & Search*\n"
+                "*News & Search*\n"
                 "/news AI technology — get a news briefing\n"
+                "/news top 3 india --from ndtv — from a specific source\n"
+                "/news latest crypto — only last 24h articles\n"
+                "Sources: hn, reuters, ap, bbc, aljazeera, npr, wsj, ars, ndtv\n"
                 "/search weather in Boston\n"
                 "/s latest iPhone price\n\n"
 
@@ -58,8 +61,9 @@ async def execute_skill_node(state: dict) -> dict:
 
                 "*Voice & TTS*\n"
                 "/say Hello world — convert text to speech\n"
-                "/voice list — browse 50+ voices\n"
-                "/voice set af bella — change your voice\n"
+                "/voice list — browse all voices (numbered)\n"
+                "/voice set single 4 — set your TTS voice\n"
+                "/voice set duo 5 3 — set podcast host & guest\n"
                 "/voice add myvoice Hello this is my voice\n"
                 "Then send a voice note to clone your voice!\n\n"
 

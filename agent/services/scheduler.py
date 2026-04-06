@@ -148,16 +148,16 @@ async def _execute_task(task: dict):
     try:
         log.info("Executing scheduled task %s (%s) for %s",
                  task["id"], task_type, task["user_jid"])
-        # Handler returns a synthetic message payload
-        payload = await handler(task)
-        if not payload:
+        # Handler returns a payload or list of payloads
+        result = await handler(task)
+        if not result:
             return
 
-        # Push through the pipeline via the message queue
-        # The pipeline handles: classify → tool calling → TTS → history → send
-        await message_queue.put(payload)
-        log.info("Queued scheduled task %s as pipeline message for %s",
-                 task["id"], task["user_jid"])
+        payloads = result if isinstance(result, list) else [result]
+        for payload in payloads:
+            await message_queue.put(payload)
+        log.info("Queued scheduled task %s (%d messages) for %s",
+                 task["id"], len(payloads), task["user_jid"])
     except Exception as e:
         log.error("Scheduled task %s failed: %s", task["id"], e, exc_info=True)
 
