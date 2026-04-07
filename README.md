@@ -380,4 +380,13 @@ Use `${ENV_VAR}` in YAML values to reference `.env` variables.
 - **Tool result wrapping** — boundary markers so the LLM distinguishes data from instructions
 - **Scheduled output sanitization** — markdown stripping + output sanitization before delivery
 
+### Google Account Security
+
+- **Token isolation** — each user's Google OAuth tokens are stored in a separate file keyed by phone number. Group members each use their own linked account.
+- **Hidden credentials** — the LLM never sees `user_jid` as a tool parameter. It is injected via closure, so prompt injection cannot redirect Google API calls to another user's tokens.
+- **Read-only LLM tools** — the LLM can call `google_calendar_events`, `google_gmail_unread`, `google_tasks_list`, and `google_contacts_search`. It cannot call `send_email` — that is only available via explicit `/google email send` command.
+- **Email header injection protection** — newlines stripped from `To` and `Subject` fields before sending.
+- **Tool output sanitization** — Google API responses (email bodies, calendar events) pass through injection pattern detection before reaching the LLM.
+- **No server-side OAuth** — token exchange happens directly between the bot and Google's API. The static callback page runs entirely in the user's browser.
+
 > **Disclaimer:** These defenses reduce the risk of prompt injection but cannot eliminate it entirely. LLMs are inherently susceptible to adversarial inputs, and novel attack vectors are discovered regularly. Do not use this bot to process sensitive or confidential documents. Do not rely on it for security-critical decisions. Use at your own risk.
