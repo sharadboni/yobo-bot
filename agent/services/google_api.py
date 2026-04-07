@@ -19,12 +19,14 @@ SCOPES = " ".join([
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/contacts.readonly",
+    "https://www.googleapis.com/auth/drive.readonly",
 ])
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 CALENDAR_API = "https://www.googleapis.com/calendar/v3"
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 TASKS_API = "https://tasks.googleapis.com/tasks/v1"
 PEOPLE_API = "https://people.googleapis.com/v1"
+DRIVE_API = "https://www.googleapis.com/drive/v3"
 TIMEOUT = 10
 NOT_LINKED = "Google account not linked. Use /google link to connect."
 EXPIRED = "Google access expired. Use /google link to reconnect."
@@ -151,12 +153,112 @@ async def get_calendar_events(user_jid: str, start_date: str, end_date: str | No
     for item in data.get("items", []):
         start = item.get("start", {})
         events.append({
+            "id": item.get("id", ""),
             "summary": item.get("summary", "(no title)"),
             "start": start.get("dateTime", start.get("date", "")),
             "end": item.get("end", {}).get("dateTime", ""),
             "location": item.get("location", ""),
         })
     return events
+
+
+async def create_calendar_event(user_jid: str, summary: str, start_time: str,
+                                end_time: str, location: str = "",
+                                description: str = "") -> str:
+    """Create a calendar event. Times in ISO format (e.g. 2026-04-07T15:00:00).
+    For all-day events, use date format (e.g. 2026-04-07)."""
+    is_allday = "T" not in start_time
+    if is_allday:
+        start_body = {"date": start_time}
+        end_body = {"date": end_time}
+    else:
+        start_body = {"dateTime": start_time, "timeZone": "America/Los_Angeles"}
+        end_body = {"dateTime": end_time, "timeZone": "America/Los_Angeles"}
+
+    body = {
+        "summary": summary,
+        "start": start_body,
+        "end": end_body,
+    }
+    if location:
+        body["location"] = location
+    if description:
+        body["description"] = description
+
+    try:
+        data = await _authed_request(user_jid, "post",
+            f"{CALENDAR_API}/calendars/primary/events", json_body=body)
+    except httpx.HTTPError as e:
+        log.error("Calendar create error: %s", e)
+        return f"Failed to create event: {e}"
+
+    if isinstance(data, str):
+        return data
+    return f"Event created: {summary}"
+
+
+async def update_calendar_event(user_jid: str, event_id: str,
+                                summary: str = "", start_time: str = "",
+                                end_time: str = "", location: str = "") -> str:
+    """Update an existing calendar event by ID. Only provided fields are changed."""
+    body = {}
+    if summary:
+        body["summary"] = summary
+    if start_time:
+        if "T" not in start_time:
+            body["start"] = {"date": start_time}
+        else:
+            body["start"] = {"dateTime": start_time, "timeZone": "America/Los_Angeles"}
+    if end_time:
+        if "T" not in end_time:
+            body["end"] = {"date": end_time}
+        else:
+            body["end"] = {"dateTime": end_time, "timeZone": "America/Los_Angeles"}
+    if location:
+        body["location"] = location
+
+    if not body:
+        return "Nothing to update."
+
+    try:
+        data = await _authed_request(user_jid, "patch",
+            f"{CALENDAR_API}/calendars/primary/events/{event_id}", json_body=body)
+    except httpx.HTTPError as e:
+        log.error("Calendar update error: %s", e)
+        return f"Failed to update event: {e}"
+
+    if isinstance(data, str):
+        return data
+    return f"Event updated: {data.get('summary', summary)}"
+
+
+async def delete_calendar_event(user_jid: str, event_id: str) -> str:
+    """Delete a calendar event by ID."""
+    token = await get_valid_token(user_jid)
+    if not token:
+        return NOT_LINKED
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.delete(
+                f"{CALENDAR_API}/calendars/primary/events/{event_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code == 401:
+                token = await refresh_access_token(user_jid)
+                if not token:
+                    return EXPIRED
+                resp = await client.delete(
+                    f"{CALENDAR_API}/calendars/primary/events/{event_id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            if resp.status_code == 204:
+                return "Event deleted."
+            resp.raise_for_status()
+    except httpx.HTTPError as e:
+        log.error("Calendar delete error: %s", e)
+        return f"Failed to delete event: {e}"
+    return "Event deleted."
 
 
 def format_events(events: list[dict], date_label: str = "today") -> str:
@@ -166,13 +268,13 @@ def format_events(events: list[dict], date_label: str = "today") -> str:
         return f"No events {date_label}."
 
     lines = [f"Calendar for {date_label}:\n"]
-    for e in events:
+    for i, e in enumerate(events, 1):
         start = e["start"]
         if "T" in start:
             time_part = start.split("T")[1][:5]
         else:
             time_part = "All day"
-        line = f"  {time_part} — {e['summary']}"
+        line = f"  {i}. {time_part} — {e['summary']}"
         if e.get("location"):
             line += f" ({e['location']})"
         lines.append(line)
@@ -438,4 +540,115 @@ def format_contacts(contacts: list[dict]) -> str:
         if c.get("phone"):
             line += f" — {c['phone']}"
         lines.append(f"  {line}")
+    return "\n".join(lines)
+
+
+# ── Drive ────────────────────────────────────────────────────────────
+
+async def search_drive(user_jid: str, query: str) -> list[dict] | str:
+    """Search Google Drive files by name or content."""
+    # Escape single quotes in query for Drive API
+    safe_q = query.replace("'", "\\'")
+    try:
+        data = await _authed_request(user_jid, "get",
+            f"{DRIVE_API}/files",
+            params={
+                "q": f"fullText contains '{safe_q}' and trashed = false",
+                "fields": "files(id,name,mimeType,modifiedTime,webViewLink,size)",
+                "pageSize": "10",
+                "orderBy": "modifiedTime desc",
+            })
+    except httpx.HTTPError as e:
+        log.error("Drive API error: %s", e)
+        return f"Failed to search Drive: {e}"
+
+    if isinstance(data, str):
+        return data
+
+    files = []
+    for f in data.get("files", []):
+        files.append({
+            "name": f.get("name", ""),
+            "type": _drive_type(f.get("mimeType", "")),
+            "modified": f.get("modifiedTime", "")[:10],
+            "link": f.get("webViewLink", ""),
+            "size": _format_size(f.get("size")),
+        })
+    return files
+
+
+async def list_recent_drive(user_jid: str, max_results: int = 10) -> list[dict] | str:
+    """List recently modified Google Drive files."""
+    try:
+        data = await _authed_request(user_jid, "get",
+            f"{DRIVE_API}/files",
+            params={
+                "q": "trashed = false",
+                "fields": "files(id,name,mimeType,modifiedTime,webViewLink,size)",
+                "pageSize": str(min(max_results, 20)),
+                "orderBy": "modifiedTime desc",
+            })
+    except httpx.HTTPError as e:
+        log.error("Drive API error: %s", e)
+        return f"Failed to list Drive files: {e}"
+
+    if isinstance(data, str):
+        return data
+
+    files = []
+    for f in data.get("files", []):
+        files.append({
+            "name": f.get("name", ""),
+            "type": _drive_type(f.get("mimeType", "")),
+            "modified": f.get("modifiedTime", "")[:10],
+            "link": f.get("webViewLink", ""),
+            "size": _format_size(f.get("size")),
+        })
+    return files
+
+
+def _drive_type(mime: str) -> str:
+    """Convert MIME type to friendly name."""
+    types = {
+        "application/vnd.google-apps.document": "Doc",
+        "application/vnd.google-apps.spreadsheet": "Sheet",
+        "application/vnd.google-apps.presentation": "Slides",
+        "application/vnd.google-apps.folder": "Folder",
+        "application/vnd.google-apps.form": "Form",
+        "application/pdf": "PDF",
+        "image/": "Image",
+        "video/": "Video",
+        "text/": "Text",
+    }
+    for prefix, label in types.items():
+        if mime.startswith(prefix):
+            return label
+    return "File"
+
+
+def _format_size(size_str) -> str:
+    if not size_str:
+        return ""
+    size = int(size_str)
+    if size < 1024:
+        return f"{size}B"
+    if size < 1024 * 1024:
+        return f"{size // 1024}KB"
+    return f"{size // (1024 * 1024)}MB"
+
+
+def format_drive_files(files: list[dict]) -> str:
+    if isinstance(files, str):
+        return files
+    if not files:
+        return "No files found."
+
+    lines = ["Drive files:\n"]
+    for i, f in enumerate(files, 1):
+        line = f"{i}. [{f['type']}] {f['name']}"
+        if f.get("modified"):
+            line += f" — {f['modified']}"
+        if f.get("size"):
+            line += f" ({f['size']})"
+        lines.append(line)
     return "\n".join(lines)

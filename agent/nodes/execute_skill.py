@@ -73,6 +73,9 @@ async def execute_skill_node(state: dict) -> dict:
                 "*Google*\n"
                 "/google link — connect your Google account\n"
                 "/google calendar — today's events\n"
+                "/google calendar add Lunch on 2026-04-07 at 12pm-1pm\n"
+                "/google calendar edit 1 time 3pm-4pm\n"
+                "/google calendar delete 1\n"
                 "/google emails — unread inbox\n"
                 "/google email read 1 — read full email\n"
                 "/google email send to@email.com Subject | Body\n"
@@ -80,6 +83,8 @@ async def execute_skill_node(state: dict) -> dict:
                 "/google task add Buy groceries\n"
                 "/google task done 1 — mark complete\n"
                 "/google contacts Sarah — search contacts\n"
+                "/google drive <query> — search Drive files\n"
+                "/google drive recent — recent files\n"
                 "/google unlink — disconnect account\n"
                 "Or ask naturally: \"Am I free at 3pm?\", \"Any new emails?\"\n\n"
 

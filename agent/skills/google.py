@@ -8,10 +8,12 @@ from agent.services.google_store import (
 )
 from agent.services.google_api import (
     get_auth_url, exchange_code,
-    get_calendar_events, format_events,
+    get_calendar_events, create_calendar_event, update_calendar_event,
+    delete_calendar_event, format_events,
     get_unread_emails, get_email_body, send_email, format_emails,
     get_tasks, add_task, complete_task, format_tasks,
     search_contacts, format_contacts,
+    search_drive, list_recent_drive, format_drive_files,
 )
 
 log = logging.getLogger(__name__)
@@ -43,10 +45,12 @@ async def google_cmd(state: dict) -> dict:
                 "/google task add <title>\n"
                 "/google task done <number>\n"
                 "/google contacts <name> — search contacts\n"
+                "/google drive <query> — search Drive files\n"
+                "/google drive recent — recent files\n"
                 "/google unlink — disconnect account"
             )}
         return {"reply_text": (
-            "Link your Google account to access calendar, email, tasks, and contacts.\n\n"
+            "Link your Google account to access calendar, email, tasks, contacts, and Drive.\n\n"
             "/google link — get authorization link"
         )}
 
@@ -75,6 +79,21 @@ async def google_cmd(state: dict) -> dict:
         if not is_linked(sender):
             return {"reply_text": _NOT_LINKED}
 
+        # Sub-subcommands: add, edit, delete
+        cal_parts = sub_args.split(None, 1) if sub_args else []
+        cal_action = cal_parts[0].lower() if cal_parts else ""
+        cal_args = cal_parts[1] if len(cal_parts) > 1 else ""
+
+        if cal_action == "add":
+            return await _calendar_add(sender, cal_args)
+
+        if cal_action in ("edit", "update"):
+            return await _calendar_edit(sender, cal_args)
+
+        if cal_action in ("delete", "remove", "cancel"):
+            return await _calendar_delete(sender, cal_args)
+
+        # Default: list events
         today = date.today()
         if sub_args.lower() == "tomorrow":
             target = today + timedelta(days=1)
@@ -200,7 +219,176 @@ async def google_cmd(state: dict) -> dict:
         contacts = await search_contacts(sender, sub_args.strip())
         return {"reply_text": format_contacts(contacts)}
 
+    # ── Drive ─────────────────────────────────────────────────────
+    if subcmd == "drive":
+        if not is_linked(sender):
+            return {"reply_text": _NOT_LINKED}
+        if not sub_args or sub_args.lower() == "recent":
+            files = await list_recent_drive(sender)
+        else:
+            files = await search_drive(sender, sub_args.strip())
+        return {"reply_text": format_drive_files(files)}
+
     return {"reply_text": "Unknown subcommand. Use /google for help."}
+
+
+# ── Calendar helpers ─────────────────────────────────────────────
+
+import re
+
+_TIME_RE = re.compile(
+    r"(\d{4}-\d{2}-\d{2})"          # date
+    r"(?:\s+(\d{1,2}(?::\d{2})?)"   # start time
+    r"(?:\s*-\s*(\d{1,2}(?::\d{2})?))?"  # optional end time
+    r")?"
+)
+
+
+def _parse_time(t: str, ref_date: str) -> str:
+    """Normalize a time like '3pm', '15:00', '3:30' to ISO datetime."""
+    t = t.strip().lower()
+    m = re.match(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", t)
+    if not m:
+        return f"{ref_date}T00:00:00"
+    h = int(m.group(1))
+    mins = int(m.group(2) or 0)
+    ampm = m.group(3)
+    if ampm == "pm" and h < 12:
+        h += 12
+    elif ampm == "am" and h == 12:
+        h = 0
+    return f"{ref_date}T{h:02d}:{mins:02d}:00"
+
+
+async def _calendar_add(sender: str, args: str) -> dict:
+    """Parse and create a calendar event.
+    Format: /google calendar add <title> on <date> [at <start>[-<end>]] [at <location>]
+    Examples:
+        /google calendar add Lunch with Bob on 2026-04-07 at 12pm-1pm
+        /google calendar add Team standup on 2026-04-07 at 9:30am
+        /google calendar add Day off on 2026-04-10
+    """
+    if not args:
+        return {"reply_text": (
+            "Usage: /google calendar add <title> on <date> [at <time>[-<end>]]\n\n"
+            "Examples:\n"
+            "  /google calendar add Lunch on 2026-04-07 at 12pm-1pm\n"
+            "  /google calendar add Meeting on 2026-04-07 at 3pm\n"
+            "  /google calendar add Day off on 2026-04-10"
+        )}
+
+    # Parse "on <date>"
+    on_match = re.search(r"\bon\s+(\d{4}-\d{2}-\d{2})", args)
+    if not on_match:
+        return {"reply_text": "Please include a date: /google calendar add <title> on YYYY-MM-DD [at time]"}
+
+    event_date = on_match.group(1)
+    title = args[:on_match.start()].strip()
+    rest = args[on_match.end():].strip()
+
+    if not title:
+        return {"reply_text": "Please include a title before 'on'."}
+
+    # Parse "at <time>[-<end>]"
+    location = ""
+    at_match = re.search(r"\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:-\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?", rest, re.I)
+    if at_match:
+        start_time = _parse_time(at_match.group(1), event_date)
+        if at_match.group(2):
+            end_time = _parse_time(at_match.group(2), event_date)
+        else:
+            # Default 1 hour duration
+            from datetime import datetime, timedelta as td
+            dt = datetime.fromisoformat(start_time)
+            end_time = (dt + td(hours=1)).isoformat()
+        # Check for location after time
+        after_time = rest[at_match.end():].strip()
+        loc_match = re.search(r"\bat\s+(.+)", after_time, re.I)
+        if loc_match:
+            location = loc_match.group(1).strip()
+    else:
+        # All-day event
+        start_time = event_date
+        end_time = event_date
+        # Check for location
+        loc_match = re.search(r"\bat\s+(.+)", rest, re.I)
+        if loc_match:
+            location = loc_match.group(1).strip()
+
+    result = await create_calendar_event(sender, title, start_time, end_time, location)
+    return {"reply_text": result}
+
+
+async def _calendar_edit(sender: str, args: str) -> dict:
+    """Edit a calendar event by number from today's list.
+    Format: /google calendar edit <number> <field> <value>
+    Fields: title, time, location
+    """
+    if not args:
+        return {"reply_text": (
+            "Usage: /google calendar edit <number> <field> <value>\n\n"
+            "Fields: title, time <start>-<end>, location\n"
+            "Number refers to the event list from /google calendar"
+        )}
+
+    parts = args.split(None, 2)
+    if len(parts) < 2 or not parts[0].isdigit():
+        return {"reply_text": "Usage: /google calendar edit <number> title|time|location <value>"}
+
+    idx = int(parts[0])
+    field = parts[1].lower()
+    value = parts[2] if len(parts) > 2 else ""
+
+    # Get today's events to find the event ID
+    today = date.today()
+    events = await get_calendar_events(sender, today.isoformat())
+    if isinstance(events, str):
+        return {"reply_text": events}
+    if idx < 1 or idx > len(events):
+        return {"reply_text": f"Invalid event number. You have {len(events)} events today."}
+
+    event = events[idx - 1]
+    event_id = event["id"]
+
+    if field == "title" and value:
+        result = await update_calendar_event(sender, event_id, summary=value)
+    elif field == "time" and value:
+        # Parse time range like "3pm-4pm"
+        time_match = re.match(r"(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*-\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", value, re.I)
+        if time_match:
+            start = _parse_time(time_match.group(1), today.isoformat())
+            end = _parse_time(time_match.group(2), today.isoformat())
+            result = await update_calendar_event(sender, event_id, start_time=start, end_time=end)
+        else:
+            start = _parse_time(value, today.isoformat())
+            from datetime import datetime, timedelta as td
+            dt = datetime.fromisoformat(start)
+            end = (dt + td(hours=1)).isoformat()
+            result = await update_calendar_event(sender, event_id, start_time=start, end_time=end)
+    elif field == "location" and value:
+        result = await update_calendar_event(sender, event_id, location=value)
+    else:
+        return {"reply_text": "Usage: /google calendar edit <number> title|time|location <value>"}
+
+    return {"reply_text": result}
+
+
+async def _calendar_delete(sender: str, args: str) -> dict:
+    """Delete a calendar event by number from today's list."""
+    if not args or not args.strip().isdigit():
+        return {"reply_text": "Usage: /google calendar delete <number>\nNumber refers to the event list from /google calendar"}
+
+    idx = int(args.strip())
+    today = date.today()
+    events = await get_calendar_events(sender, today.isoformat())
+    if isinstance(events, str):
+        return {"reply_text": events}
+    if idx < 1 or idx > len(events):
+        return {"reply_text": f"Invalid event number. You have {len(events)} events today."}
+
+    event = events[idx - 1]
+    result = await delete_calendar_event(sender, event["id"])
+    return {"reply_text": result}
 
 
 async def google_link_callback(state: dict) -> dict:

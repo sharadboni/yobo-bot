@@ -83,8 +83,9 @@ async def text_chat(state: dict) -> dict:
         # Inject sender_jid into Google tools via closure
         sender_jid = state.get("sender_jid") or state.get("user_jid", "")
         executors = dict(TOOL_EXECUTORS)
-        for tool_name in ("google_calendar_events", "google_gmail_unread",
-                          "google_tasks_list", "google_contacts_search"):
+        for tool_name in ("google_calendar_events", "google_calendar_create",
+                          "google_gmail_unread", "google_tasks_list",
+                          "google_contacts_search", "google_drive_search"):
             orig = executors.get(tool_name)
             if orig:
                 executors[tool_name] = (lambda fn: lambda **kw: fn(**kw, user_jid=sender_jid))(orig)

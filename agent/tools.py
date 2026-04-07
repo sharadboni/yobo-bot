@@ -156,6 +156,39 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "google_calendar_create",
+            "description": "Create a Google Calendar event or schedule something on the user's calendar. Use this for meetings, appointments, reminders with specific times, and tasks the user wants on their calendar. Only works if the user has linked their Google account.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Event title",
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "description": "Start time in ISO format (e.g. 2026-04-07T15:00:00) or date for all-day (2026-04-07)",
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "End time in ISO format. For all-day events, use the same date as start_time.",
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "Event location (optional)",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Event description (optional)",
+                    },
+                },
+                "required": ["summary", "start_time", "end_time"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "google_gmail_unread",
             "description": "Get the user's unread emails from Gmail inbox. Only works if the user has linked their Google account.",
             "parameters": {
@@ -174,7 +207,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "google_tasks_list",
-            "description": "Get the user's pending Google Tasks. Only works if the user has linked their Google account.",
+            "description": "Get the user's pending Google Tasks (to-do list items without specific times). Only works if the user has linked their Google account.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -193,6 +226,23 @@ TOOLS = [
                     "query": {
                         "type": "string",
                         "description": "Name or email to search for",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "google_drive_search",
+            "description": "Search the user's Google Drive files by name or content. Only works if the user has linked their Google account.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (file name or content keywords)",
                     },
                 },
                 "required": ["query"],
@@ -887,6 +937,20 @@ async def google_calendar_events(start_date: str, end_date: str = "", user_jid: 
     return sanitize_tool_output(result, source="google_calendar")
 
 
+async def google_calendar_create(summary: str, start_time: str, end_time: str,
+                                 location: str = "", description: str = "",
+                                 user_jid: str = "") -> str:
+    """Create a Google Calendar event. user_jid injected via closure."""
+    if not user_jid:
+        return "Cannot access Google: no user context."
+    from agent.services.google_store import is_linked
+    if not is_linked(user_jid):
+        return "Google account not linked. The user needs to run /google link first."
+    from agent.services.google_api import create_calendar_event
+    result = await create_calendar_event(user_jid, summary, start_time, end_time, location, description)
+    return sanitize_tool_output(result, source="google_calendar")
+
+
 async def google_gmail_unread(max_results: int = 5, user_jid: str = "") -> str:
     """Fetch unread Gmail messages. user_jid injected via closure."""
     if not user_jid:
@@ -926,6 +990,19 @@ async def google_contacts_search(query: str, user_jid: str = "") -> str:
     return sanitize_tool_output(result, source="google_contacts")
 
 
+async def google_drive_search(query: str, user_jid: str = "") -> str:
+    """Search Google Drive files. user_jid injected via closure."""
+    if not user_jid:
+        return "Cannot access Google: no user context."
+    from agent.services.google_store import is_linked
+    if not is_linked(user_jid):
+        return "Google account not linked. The user needs to run /google link first."
+    from agent.services.google_api import search_drive, format_drive_files
+    files = await search_drive(user_jid, query)
+    result = format_drive_files(files)
+    return sanitize_tool_output(result, source="google_drive")
+
+
 TOOL_EXECUTORS = {
     "web_search": web_search,
     "news_search": news_search,
@@ -933,7 +1010,9 @@ TOOL_EXECUTORS = {
     "read_page": read_page,
     "weather": weather,
     "google_calendar_events": google_calendar_events,
+    "google_calendar_create": google_calendar_create,
     "google_gmail_unread": google_gmail_unread,
     "google_tasks_list": google_tasks_list,
     "google_contacts_search": google_contacts_search,
+    "google_drive_search": google_drive_search,
 }
