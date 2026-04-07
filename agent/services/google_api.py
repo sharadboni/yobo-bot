@@ -1,7 +1,9 @@
-"""Google OAuth2 and Calendar API via httpx."""
+"""Google OAuth2, Calendar, Gmail, Tasks, and Contacts APIs via httpx."""
 from __future__ import annotations
+import base64
 import time
 import logging
+from email.mime.text import MIMEText
 import httpx
 from agent.config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI
 from agent.services.google_store import (
@@ -20,7 +22,12 @@ SCOPES = " ".join([
 ])
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 CALENDAR_API = "https://www.googleapis.com/calendar/v3"
+GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
+TASKS_API = "https://tasks.googleapis.com/tasks/v1"
+PEOPLE_API = "https://people.googleapis.com/v1"
 TIMEOUT = 10
+NOT_LINKED = "Google account not linked. Use /google link to connect."
+EXPIRED = "Google access expired. Use /google link to reconnect."
 
 
 def get_auth_url() -> str:
@@ -92,53 +99,53 @@ async def get_valid_token(user_jid: str) -> str | None:
     return await refresh_access_token(user_jid)
 
 
-async def get_calendar_events(user_jid: str, start_date: str, end_date: str | None = None) -> list[dict] | str:
-    """Fetch calendar events for a date range. Returns list of events or error string."""
+async def _authed_request(user_jid: str, method: str, url: str,
+                         params: dict = None, json_body: dict = None) -> dict | str:
+    """Make an authenticated Google API request with auto-retry on 401."""
     token = await get_valid_token(user_jid)
     if not token:
-        return "Google account not linked. Use /google link to connect."
+        return NOT_LINKED
 
-    # Build time range
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        kwargs = {"headers": {"Authorization": f"Bearer {token}"}}
+        if params:
+            kwargs["params"] = params
+        if json_body is not None:
+            kwargs["json"] = json_body
+
+        resp = await getattr(client, method)(url, **kwargs)
+
+        if resp.status_code == 401:
+            token = await refresh_access_token(user_jid)
+            if not token:
+                return EXPIRED
+            kwargs["headers"] = {"Authorization": f"Bearer {token}"}
+            resp = await getattr(client, method)(url, **kwargs)
+
+        resp.raise_for_status()
+        return resp.json()
+
+
+# ── Calendar ─────────────────────────────────────────────────────────
+
+async def get_calendar_events(user_jid: str, start_date: str, end_date: str | None = None) -> list[dict] | str:
+    """Fetch calendar events for a date range."""
     time_min = f"{start_date}T00:00:00Z"
-    if end_date:
-        time_max = f"{end_date}T23:59:59Z"
-    else:
-        time_max = f"{start_date}T23:59:59Z"
+    time_max = f"{(end_date or start_date)}T23:59:59Z"
 
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.get(
-                f"{CALENDAR_API}/calendars/primary/events",
-                headers={"Authorization": f"Bearer {token}"},
-                params={
-                    "timeMin": time_min,
-                    "timeMax": time_max,
-                    "singleEvents": "true",
-                    "orderBy": "startTime",
-                    "maxResults": "25",
-                },
-            )
-            if resp.status_code == 401:
-                # Token might be stale, try refresh once
-                token = await refresh_access_token(user_jid)
-                if not token:
-                    return "Google access expired. Use /google link to reconnect."
-                resp = await client.get(
-                    f"{CALENDAR_API}/calendars/primary/events",
-                    headers={"Authorization": f"Bearer {token}"},
-                    params={
-                        "timeMin": time_min,
-                        "timeMax": time_max,
-                        "singleEvents": "true",
-                        "orderBy": "startTime",
-                        "maxResults": "25",
-                    },
-                )
-            resp.raise_for_status()
-            data = resp.json()
+        data = await _authed_request(user_jid, "get",
+            f"{CALENDAR_API}/calendars/primary/events",
+            params={
+                "timeMin": time_min, "timeMax": time_max,
+                "singleEvents": "true", "orderBy": "startTime", "maxResults": "25",
+            })
     except httpx.HTTPError as e:
         log.error("Calendar API error: %s", e)
         return f"Failed to fetch calendar: {e}"
+
+    if isinstance(data, str):
+        return data  # error message
 
     events = []
     for item in data.get("items", []):
@@ -153,23 +160,278 @@ async def get_calendar_events(user_jid: str, start_date: str, end_date: str | No
 
 
 def format_events(events: list[dict], date_label: str = "today") -> str:
-    """Format calendar events for WhatsApp display."""
     if isinstance(events, str):
-        return events  # error message
+        return events
     if not events:
         return f"No events {date_label}."
 
     lines = [f"Calendar for {date_label}:\n"]
     for e in events:
         start = e["start"]
-        # Extract time from ISO datetime
         if "T" in start:
             time_part = start.split("T")[1][:5]
         else:
             time_part = "All day"
-
         line = f"  {time_part} — {e['summary']}"
         if e.get("location"):
             line += f" ({e['location']})"
         lines.append(line)
+    return "\n".join(lines)
+
+
+# ── Gmail ────────────────────────────────────────────────────────────
+
+async def get_unread_emails(user_jid: str, max_results: int = 10) -> list[dict] | str:
+    """Fetch unread emails from inbox."""
+    try:
+        data = await _authed_request(user_jid, "get",
+            f"{GMAIL_API}/messages",
+            params={"q": "is:unread is:inbox", "maxResults": str(max_results)})
+    except httpx.HTTPError as e:
+        log.error("Gmail list error: %s", e)
+        return f"Failed to fetch emails: {e}"
+
+    if isinstance(data, str):
+        return data
+
+    messages = data.get("messages", [])
+    if not messages:
+        return []
+
+    # Fetch headers for each message
+    emails = []
+    for msg in messages[:max_results]:
+        try:
+            detail = await _authed_request(user_jid, "get",
+                f"{GMAIL_API}/messages/{msg['id']}",
+                params={"format": "metadata", "metadataHeaders": "From,Subject,Date"})
+            if isinstance(detail, str):
+                continue
+            headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
+            emails.append({
+                "id": msg["id"],
+                "from": headers.get("From", ""),
+                "subject": headers.get("Subject", "(no subject)"),
+                "date": headers.get("Date", ""),
+                "snippet": detail.get("snippet", ""),
+            })
+        except Exception:
+            continue
+    return emails
+
+
+async def get_email_body(user_jid: str, message_id: str) -> str:
+    """Fetch the full text body of an email."""
+    try:
+        data = await _authed_request(user_jid, "get",
+            f"{GMAIL_API}/messages/{message_id}",
+            params={"format": "full"})
+    except httpx.HTTPError as e:
+        return f"Failed to read email: {e}"
+
+    if isinstance(data, str):
+        return data
+
+    # Extract plain text body
+    payload = data.get("payload", {})
+    return _extract_text(payload) or data.get("snippet", "No content.")
+
+
+def _extract_text(payload: dict) -> str:
+    """Recursively extract text/plain from Gmail payload."""
+    mime = payload.get("mimeType", "")
+    if mime == "text/plain" and payload.get("body", {}).get("data"):
+        return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", errors="replace")
+    for part in payload.get("parts", []):
+        text = _extract_text(part)
+        if text:
+            return text
+    return ""
+
+
+async def send_email(user_jid: str, to: str, subject: str, body: str) -> str:
+    """Send an email. Returns success message or error."""
+    token = await get_valid_token(user_jid)
+    if not token:
+        return NOT_LINKED
+
+    msg = MIMEText(body)
+    msg["To"] = to
+    msg["Subject"] = subject
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.post(
+                f"{GMAIL_API}/messages/send",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"raw": raw},
+            )
+            if resp.status_code == 401:
+                token = await refresh_access_token(user_jid)
+                if not token:
+                    return EXPIRED
+                resp = await client.post(
+                    f"{GMAIL_API}/messages/send",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"raw": raw},
+                )
+            resp.raise_for_status()
+    except httpx.HTTPError as e:
+        log.error("Gmail send error: %s", e)
+        return f"Failed to send email: {e}"
+
+    return f"Email sent to {to}."
+
+
+def format_emails(emails: list[dict]) -> str:
+    if isinstance(emails, str):
+        return emails
+    if not emails:
+        return "No unread emails."
+
+    lines = ["Unread emails:\n"]
+    for i, e in enumerate(emails, 1):
+        sender = e["from"].split("<")[0].strip() or e["from"]
+        lines.append(f"{i}. {sender}\n   {e['subject']}\n   {e['snippet'][:80]}")
+    return "\n".join(lines)
+
+
+# ── Tasks ────────────────────────────────────────────────────────────
+
+async def get_task_lists(user_jid: str) -> list[dict] | str:
+    """Get all task lists."""
+    try:
+        data = await _authed_request(user_jid, "get", f"{TASKS_API}/users/@me/lists")
+    except httpx.HTTPError as e:
+        log.error("Tasks API error: %s", e)
+        return f"Failed to fetch task lists: {e}"
+
+    if isinstance(data, str):
+        return data
+    return [{"id": t["id"], "title": t["title"]} for t in data.get("items", [])]
+
+
+async def get_tasks(user_jid: str, tasklist_id: str = "@default") -> list[dict] | str:
+    """Get tasks from a task list. Defaults to the primary list."""
+    try:
+        data = await _authed_request(user_jid, "get",
+            f"{TASKS_API}/lists/{tasklist_id}/tasks",
+            params={"showCompleted": "false", "maxResults": "20"})
+    except httpx.HTTPError as e:
+        log.error("Tasks API error: %s", e)
+        return f"Failed to fetch tasks: {e}"
+
+    if isinstance(data, str):
+        return data
+
+    tasks = []
+    for t in data.get("items", []):
+        if t.get("status") == "completed":
+            continue
+        tasks.append({
+            "id": t["id"],
+            "title": t.get("title", "(no title)"),
+            "due": t.get("due", ""),
+            "notes": t.get("notes", ""),
+        })
+    return tasks
+
+
+async def add_task(user_jid: str, title: str, notes: str = "", due: str = "",
+                   tasklist_id: str = "@default") -> str:
+    """Add a task to a list. Returns confirmation or error."""
+    body = {"title": title, "status": "needsAction"}
+    if notes:
+        body["notes"] = notes
+    if due:
+        body["due"] = f"{due}T00:00:00.000Z"
+
+    try:
+        data = await _authed_request(user_jid, "post",
+            f"{TASKS_API}/lists/{tasklist_id}/tasks", json_body=body)
+    except httpx.HTTPError as e:
+        log.error("Tasks add error: %s", e)
+        return f"Failed to add task: {e}"
+
+    if isinstance(data, str):
+        return data
+    return f"Task added: {title}"
+
+
+async def complete_task(user_jid: str, task_id: str, tasklist_id: str = "@default") -> str:
+    """Mark a task as completed."""
+    try:
+        data = await _authed_request(user_jid, "patch",
+            f"{TASKS_API}/lists/{tasklist_id}/tasks/{task_id}",
+            json_body={"status": "completed"})
+    except httpx.HTTPError as e:
+        log.error("Tasks complete error: %s", e)
+        return f"Failed to complete task: {e}"
+
+    if isinstance(data, str):
+        return data
+    return "Task completed."
+
+
+def format_tasks(tasks: list[dict]) -> str:
+    if isinstance(tasks, str):
+        return tasks
+    if not tasks:
+        return "No pending tasks."
+
+    lines = ["Your tasks:\n"]
+    for i, t in enumerate(tasks, 1):
+        line = f"{i}. {t['title']}"
+        if t.get("due"):
+            line += f" (due {t['due'][:10]})"
+        if t.get("notes"):
+            line += f"\n   {t['notes'][:60]}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+# ── Contacts ─────────────────────────────────────────────────────────
+
+async def search_contacts(user_jid: str, query: str) -> list[dict] | str:
+    """Search Google Contacts by name or email."""
+    try:
+        data = await _authed_request(user_jid, "get",
+            f"{PEOPLE_API}/people:searchContacts",
+            params={"query": query, "readMask": "names,emailAddresses,phoneNumbers", "pageSize": "10"})
+    except httpx.HTTPError as e:
+        log.error("Contacts API error: %s", e)
+        return f"Failed to search contacts: {e}"
+
+    if isinstance(data, str):
+        return data
+
+    contacts = []
+    for result in data.get("results", []):
+        person = result.get("person", {})
+        names = person.get("names", [{}])
+        emails = person.get("emailAddresses", [])
+        phones = person.get("phoneNumbers", [])
+        contacts.append({
+            "name": names[0].get("displayName", "") if names else "",
+            "email": emails[0].get("value", "") if emails else "",
+            "phone": phones[0].get("value", "") if phones else "",
+        })
+    return contacts
+
+
+def format_contacts(contacts: list[dict]) -> str:
+    if isinstance(contacts, str):
+        return contacts
+    if not contacts:
+        return "No contacts found."
+
+    lines = ["Contacts:\n"]
+    for c in contacts:
+        line = c["name"]
+        if c.get("email"):
+            line += f" — {c['email']}"
+        if c.get("phone"):
+            line += f" — {c['phone']}"
+        lines.append(f"  {line}")
     return "\n".join(lines)

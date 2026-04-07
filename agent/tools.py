@@ -153,6 +153,52 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "google_gmail_unread",
+            "description": "Get the user's unread emails from Gmail inbox. Only works if the user has linked their Google account.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of emails to return (default 5, max 20).",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "google_tasks_list",
+            "description": "Get the user's pending Google Tasks. Only works if the user has linked their Google account.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "google_contacts_search",
+            "description": "Search the user's Google Contacts by name or email. Only works if the user has linked their Google account.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Name or email to search for",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
 ]
 
 
@@ -831,7 +877,7 @@ async def weather(location: str, start_date: str = "", end_date: str = "") -> st
 async def google_calendar_events(start_date: str, end_date: str = "", user_jid: str = "") -> str:
     """Fetch Google Calendar events. user_jid is injected by text_chat via closure."""
     if not user_jid:
-        return "Cannot access calendar: no user context."
+        return "Cannot access Google: no user context."
     from agent.services.google_store import is_linked
     if not is_linked(user_jid):
         return "Google account not linked. The user needs to run /google link first."
@@ -841,6 +887,45 @@ async def google_calendar_events(start_date: str, end_date: str = "", user_jid: 
     return sanitize_tool_output(result, source="google_calendar")
 
 
+async def google_gmail_unread(max_results: int = 5, user_jid: str = "") -> str:
+    """Fetch unread Gmail messages. user_jid injected via closure."""
+    if not user_jid:
+        return "Cannot access Google: no user context."
+    from agent.services.google_store import is_linked
+    if not is_linked(user_jid):
+        return "Google account not linked. The user needs to run /google link first."
+    from agent.services.google_api import get_unread_emails, format_emails
+    emails = await get_unread_emails(user_jid, min(max_results, 20))
+    result = format_emails(emails)
+    return sanitize_tool_output(result, source="google_gmail")
+
+
+async def google_tasks_list(user_jid: str = "") -> str:
+    """Fetch pending Google Tasks. user_jid injected via closure."""
+    if not user_jid:
+        return "Cannot access Google: no user context."
+    from agent.services.google_store import is_linked
+    if not is_linked(user_jid):
+        return "Google account not linked. The user needs to run /google link first."
+    from agent.services.google_api import get_tasks, format_tasks
+    tasks = await get_tasks(user_jid)
+    result = format_tasks(tasks)
+    return sanitize_tool_output(result, source="google_tasks")
+
+
+async def google_contacts_search(query: str, user_jid: str = "") -> str:
+    """Search Google Contacts. user_jid injected via closure."""
+    if not user_jid:
+        return "Cannot access Google: no user context."
+    from agent.services.google_store import is_linked
+    if not is_linked(user_jid):
+        return "Google account not linked. The user needs to run /google link first."
+    from agent.services.google_api import search_contacts, format_contacts
+    contacts = await search_contacts(user_jid, query)
+    result = format_contacts(contacts)
+    return sanitize_tool_output(result, source="google_contacts")
+
+
 TOOL_EXECUTORS = {
     "web_search": web_search,
     "news_search": news_search,
@@ -848,4 +933,7 @@ TOOL_EXECUTORS = {
     "read_page": read_page,
     "weather": weather,
     "google_calendar_events": google_calendar_events,
+    "google_gmail_unread": google_gmail_unread,
+    "google_tasks_list": google_tasks_list,
+    "google_contacts_search": google_contacts_search,
 }

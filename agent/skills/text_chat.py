@@ -80,12 +80,14 @@ async def text_chat(state: dict) -> dict:
     if needs:
         log.info("Routing to tool-calling model for: %s", resolved[:60])
         messages = _build_messages(get_system_prompt_tools(), profile, resolved)
-        # Inject sender_jid into google_calendar_events tool via closure
+        # Inject sender_jid into Google tools via closure
         sender_jid = state.get("sender_jid") or state.get("user_jid", "")
         executors = dict(TOOL_EXECUTORS)
-        _orig_cal = executors.get("google_calendar_events")
-        if _orig_cal:
-            executors["google_calendar_events"] = lambda **kw: _orig_cal(**kw, user_jid=sender_jid)
+        for tool_name in ("google_calendar_events", "google_gmail_unread",
+                          "google_tasks_list", "google_contacts_search"):
+            orig = executors.get(tool_name)
+            if orig:
+                executors[tool_name] = (lambda fn: lambda **kw: fn(**kw, user_jid=sender_jid))(orig)
         try:
             reply = await chat_completion_with_tools(
                 messages, tools=TOOLS, tool_executor=executors,

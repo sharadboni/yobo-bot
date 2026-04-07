@@ -24,7 +24,10 @@ WhatsApp <-> Gateway (Node.js/Baileys) <-> WebSocket :8765 <-> Agent (Python/Lan
 | **79 voice presets** | 54 Kokoro + 25 VibeVoice voices, set by number or name |
 | **Web search** | `/search <query>` or just ask — the bot decides when to search |
 | **News aggregation** | `/news <topic> [--from source]` — LLM picks sources or target a specific one; recency keywords filter to last 24h |
-| **Google Calendar** | `/google link` to connect your account, then `/google calendar` or ask "Am I free at 3pm?" |
+| **Google Calendar** | `/google link` to connect, then `/google calendar` or ask "Am I free at 3pm?" |
+| **Gmail** | `/google emails` for unread inbox, `/google email read 1` for full email, `/google email send to@email.com Subject \| Body` to send |
+| **Google Tasks** | `/google tasks` to list, `/google task add Buy groceries`, `/google task done 1` to complete |
+| **Google Contacts** | `/google contacts Sarah` to search by name or email |
 | **Group chats** | Add the bot to a group — responds to @mentions, replies to its messages, and `/commands`. Shared profile, history, and schedules per group. Supports images, documents, and voice in groups too |
 
 ## Quick Start
