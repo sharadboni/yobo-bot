@@ -11,6 +11,11 @@ MAX_HISTORY = int(os.getenv("MAX_HISTORY_MESSAGES", "50"))
 DATA_DIR = os.getenv("DATA_DIR", "data/users")
 SEARCH_MAX_RESULTS = int(os.getenv("SEARCH_MAX_RESULTS", "5"))
 
+# Google OAuth
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "https://sharadboni.github.io/yobo-bot/")
+
 # --- System prompts: fully independent per path ---
 
 _SECURITY = (
@@ -51,6 +56,7 @@ def get_system_prompt_tools() -> str:
         "- Facts, people, history: wikipedia\n"
         "- Prices, general queries: web_search\n"
         "- Deep dive into a URL: read_page\n"
+        "- Calendar events, schedule, free/busy: google_calendar_events\n"
         "- When unsure, call a tool anyway.\n\n"
         "Response rules:\n"
         "- Never narrate your search process. Just give the answer.\n"

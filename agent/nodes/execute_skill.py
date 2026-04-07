@@ -8,6 +8,7 @@ from agent.skills.podcast import podcast
 from agent.skills.schedule import schedule_add, schedule_list, schedule_remove
 from agent.skills.voice import voice_cmd
 from agent.skills.say import say
+from agent.skills.google import google_cmd, google_link_callback
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +22,8 @@ SKILLS = {
     "schedule_remove": schedule_remove,
     "voice": voice_cmd,
     "say": say,
+    "google": google_cmd,
+    "google_link_callback": google_link_callback,
 }
 
 
@@ -66,6 +69,13 @@ async def execute_skill_node(state: dict) -> dict:
                 "/voice set duo 5 3 — set podcast host & guest\n"
                 "/voice add myvoice Hello this is my voice\n"
                 "Then send a voice note to clone your voice!\n\n"
+
+                "*Google Calendar*\n"
+                "/google link — connect your Google account\n"
+                "/google calendar — today's events\n"
+                "/google calendar tomorrow — tomorrow's events\n"
+                "/google unlink — disconnect account\n"
+                "Or just ask: \"Am I free at 3pm?\"\n\n"
 
                 "*Documents*\n"
                 "Send any PDF, TXT, CSV, or JSON file.\n"

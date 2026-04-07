@@ -132,6 +132,27 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "google_calendar_events",
+            "description": "Get the user's Google Calendar events for a date. Only works if the user has linked their Google account.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start date in YYYY-MM-DD format",
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "End date in YYYY-MM-DD format. Defaults to start_date if omitted.",
+                    },
+                },
+                "required": ["start_date"],
+            },
+        },
+    },
 ]
 
 
@@ -807,10 +828,24 @@ async def weather(location: str, start_date: str = "", end_date: str = "") -> st
     return "\n".join(lines)
 
 
+async def google_calendar_events(start_date: str, end_date: str = "", user_jid: str = "") -> str:
+    """Fetch Google Calendar events. user_jid is injected by text_chat via closure."""
+    if not user_jid:
+        return "Cannot access calendar: no user context."
+    from agent.services.google_store import is_linked
+    if not is_linked(user_jid):
+        return "Google account not linked. The user needs to run /google link first."
+    from agent.services.google_api import get_calendar_events, format_events
+    events = await get_calendar_events(user_jid, start_date, end_date or None)
+    result = format_events(events, start_date)
+    return sanitize_tool_output(result, source="google_calendar")
+
+
 TOOL_EXECUTORS = {
     "web_search": web_search,
     "news_search": news_search,
     "wikipedia": wikipedia,
     "read_page": read_page,
     "weather": weather,
+    "google_calendar_events": google_calendar_events,
 }

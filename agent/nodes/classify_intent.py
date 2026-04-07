@@ -1,5 +1,6 @@
 """Classify intent: match slash commands to skills, default to chat."""
 from __future__ import annotations
+import re
 import logging
 
 log = logging.getLogger(__name__)
@@ -18,8 +19,13 @@ SKILL_MAP = {
     "/voice": "voice",
     "/v": "voice",
     "/say": "say",
+    "/google": "google",
+    "/g": "google",
     "/help": "help",
 }
+
+# Google OAuth authorization code pattern (e.g. 4/0AXxxx...)
+_OAUTH_CODE_RE = re.compile(r"^4/0A[A-Za-z0-9_-]{20,}$")
 
 
 def classify_intent_node(state: dict) -> dict:
@@ -28,6 +34,13 @@ def classify_intent_node(state: dict) -> dict:
         return {}
 
     text = state.get("resolved_text", "").strip()
+
+    # Check for Google OAuth code (only if user has a pending link)
+    if _OAUTH_CODE_RE.match(text):
+        from agent.services.google_store import has_pending_link
+        sender = state.get("sender_jid") or state.get("user_jid", "")
+        if has_pending_link(sender):
+            return {"intent": "google_link_callback", "intent_args": text}
 
     # Check for slash commands
     if text.startswith("/"):

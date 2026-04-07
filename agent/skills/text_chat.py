@@ -80,9 +80,15 @@ async def text_chat(state: dict) -> dict:
     if needs:
         log.info("Routing to tool-calling model for: %s", resolved[:60])
         messages = _build_messages(get_system_prompt_tools(), profile, resolved)
+        # Inject sender_jid into google_calendar_events tool via closure
+        sender_jid = state.get("sender_jid") or state.get("user_jid", "")
+        executors = dict(TOOL_EXECUTORS)
+        _orig_cal = executors.get("google_calendar_events")
+        if _orig_cal:
+            executors["google_calendar_events"] = lambda **kw: _orig_cal(**kw, user_jid=sender_jid)
         try:
             reply = await chat_completion_with_tools(
-                messages, tools=TOOLS, tool_executor=TOOL_EXECUTORS,
+                messages, tools=TOOLS, tool_executor=executors,
                 max_rounds=5,
             )
         except Exception as e:

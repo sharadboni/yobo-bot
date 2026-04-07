@@ -8,7 +8,8 @@ class AgentState(TypedDict):
     """State passed through the LangGraph pipeline."""
     # Inbound message from gateway
     inbound: dict             # raw WS payload
-    user_jid: str             # sender's JID (actual person, even in groups)
+    user_jid: str             # profile identity (group JID in groups, user JID in DMs)
+    sender_jid: str           # actual person's JID (same as user_jid in DMs)
     push_name: str            # WhatsApp display name
     admin_jid: str            # admin's JID
 

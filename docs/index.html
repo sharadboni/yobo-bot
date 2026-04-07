@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yobo Bot — Google Authorization</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f5f5f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            max-width: 440px;
+            width: 100%;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            text-align: center;
+        }
+        h1 { font-size: 24px; margin-bottom: 8px; }
+        .subtitle { color: #666; margin-bottom: 24px; }
+        .code-box {
+            background: #f0f0f0;
+            border: 2px dashed #ccc;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 14px;
+            user-select: all;
+            cursor: pointer;
+        }
+        .code-box.copied {
+            border-color: #4CAF50;
+            background: #e8f5e9;
+        }
+        .instruction {
+            color: #333;
+            line-height: 1.6;
+            margin-top: 16px;
+        }
+        .step { margin: 8px 0; }
+        .error { color: #d32f2f; }
+        .copy-btn {
+            background: #25D366;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 12px;
+        }
+        .copy-btn:active { background: #1da851; }
+        .copied-msg { color: #4CAF50; font-weight: bold; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <div class="card" id="content">
+        <h1>Yobo Bot</h1>
+        <p class="subtitle">Google Authorization</p>
+        <div id="result"></div>
+    </div>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('code');
+        const error = params.get('error');
+        const result = document.getElementById('result');
+
+        if (error) {
+            result.innerHTML = `<p class="error">Authorization was denied or failed.<br>Error: ${error}</p>
+                <p class="instruction">Go back to WhatsApp and try <strong>/google link</strong> again.</p>`;
+        } else if (code) {
+            result.innerHTML = `
+                <p class="instruction">Copy this code and send it to Yobo in WhatsApp:</p>
+                <div class="code-box" id="codeBox" onclick="copyCode()">${code}</div>
+                <button class="copy-btn" onclick="copyCode()">Copy Code</button>
+                <p id="copiedMsg" class="copied-msg" style="display:none">Copied! Now paste it in WhatsApp.</p>
+                <div class="instruction">
+                    <p class="step">1. Tap <strong>Copy Code</strong> above</p>
+                    <p class="step">2. Switch to WhatsApp</p>
+                    <p class="step">3. Paste and send the code to Yobo</p>
+                </div>`;
+        } else {
+            result.innerHTML = `<p class="error">No authorization code found.</p>
+                <p class="instruction">Go back to WhatsApp and use <strong>/google link</strong> to start.</p>`;
+        }
+
+        function copyCode() {
+            navigator.clipboard.writeText(code).then(() => {
+                document.getElementById('codeBox').classList.add('copied');
+                document.getElementById('copiedMsg').style.display = 'block';
+            }).catch(() => {
+                // Fallback: select the text
+                const range = document.createRange();
+                range.selectNode(document.getElementById('codeBox'));
+                window.getSelection().removeAllRanges();
+                window.getSelection().addRange(range);
+            });
+        }
+    </script>
+</body>
+</html>

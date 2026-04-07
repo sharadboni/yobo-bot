@@ -80,6 +80,7 @@ async def handle_message(send_fn, payload: dict):
         result = await graph.ainvoke({
             "inbound": payload,
             "user_jid": user_jid,
+            "sender_jid": sender_jid,
             "push_name": push_name,
             "admin_jid": admin.admin_jid,
             "is_group": is_group,

@@ -16,7 +16,7 @@ setup-agent:
 	playwright install chromium
 
 setup-data:
-	mkdir -p data/users data/auth data/schedules data/voices $(LOGS_DIR)
+	mkdir -p data/users data/auth data/schedules data/voices data/google $(LOGS_DIR)
 
 # Run foreground (for development / QR scan)
 gateway:
