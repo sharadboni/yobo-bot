@@ -21,6 +21,7 @@ SCOPES = " ".join([
     "https://www.googleapis.com/auth/contacts.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
     "https://www.googleapis.com/auth/keep",
+    "https://www.googleapis.com/auth/keep.readonly",
 ])
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 CALENDAR_API = "https://www.googleapis.com/calendar/v3"
