@@ -2,7 +2,6 @@
 from __future__ import annotations
 import time
 import logging
-from urllib.parse import urlencode
 import httpx
 from agent.config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI
 from agent.services.google_store import (
@@ -25,16 +24,10 @@ TIMEOUT = 10
 
 
 def get_auth_url() -> str:
-    """Generate the Google OAuth consent URL."""
-    params = {
-        "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": GOOGLE_REDIRECT_URI,
-        "response_type": "code",
-        "scope": SCOPES,
-        "access_type": "offline",
-        "prompt": "consent",
-    }
-    return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+    """Generate a short URL that redirects to Google OAuth via the static page.
+    WhatsApp strips underscores from URLs, so we let the static page build
+    the actual Google auth URL with JavaScript (preserving response_type etc.)."""
+    return f"{GOOGLE_REDIRECT_URI}?clientid={GOOGLE_CLIENT_ID}"
 
 
 async def exchange_code(code: str) -> dict:

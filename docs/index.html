@@ -61,6 +61,7 @@
         }
         .copy-btn:active { background: #1da851; }
         .copied-msg { color: #4CAF50; font-weight: bold; margin-top: 8px; }
+        .loading { color: #666; font-size: 18px; }
     </style>
 </head>
 <body>
@@ -73,9 +74,33 @@
         const params = new URLSearchParams(window.location.search);
         const code = params.get('code');
         const error = params.get('error');
+        const clientId = params.get('clientid');
         const result = document.getElementById('result');
 
-        if (error) {
+        // Step 1: Bot sends user here with ?clientid=XXX — redirect to Google OAuth
+        if (clientId) {
+            result.innerHTML = '<p class="loading">Redirecting to Google...</p>';
+            const redirectUri = window.location.origin + window.location.pathname;
+            const scopes = [
+                'https://www.googleapis.com/auth/calendar.readonly',
+                'https://www.googleapis.com/auth/calendar.events',
+                'https://www.googleapis.com/auth/gmail.readonly',
+                'https://www.googleapis.com/auth/gmail.send',
+                'https://www.googleapis.com/auth/tasks',
+                'https://www.googleapis.com/auth/contacts.readonly',
+            ].join(' ');
+            const authUrl = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+                client_id: clientId,
+                redirect_uri: redirectUri,
+                response_type: 'code',
+                scope: scopes,
+                access_type: 'offline',
+                prompt: 'consent',
+            }).toString();
+            window.location.href = authUrl;
+
+        // Step 2: Google redirects back here with ?code=XXX — show code to user
+        } else if (error) {
             result.innerHTML = `<p class="error">Authorization was denied or failed.<br>Error: ${error}</p>
                 <p class="instruction">Go back to WhatsApp and try <strong>/google link</strong> again.</p>`;
         } else if (code) {
@@ -99,7 +124,6 @@
                 document.getElementById('codeBox').classList.add('copied');
                 document.getElementById('copiedMsg').style.display = 'block';
             }).catch(() => {
-                // Fallback: select the text
                 const range = document.createRange();
                 range.selectNode(document.getElementById('codeBox'));
                 window.getSelection().removeAllRanges();
