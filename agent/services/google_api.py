@@ -255,6 +255,10 @@ async def send_email(user_jid: str, to: str, subject: str, body: str) -> str:
     if not token:
         return NOT_LINKED
 
+    # Strip newlines to prevent header injection
+    to = to.replace("\n", "").replace("\r", "")
+    subject = subject.replace("\n", " ").replace("\r", "")
+
     msg = MIMEText(body)
     msg["To"] = to
     msg["Subject"] = subject
