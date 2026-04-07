@@ -85,6 +85,8 @@ async def execute_skill_node(state: dict) -> dict:
                 "/google contacts Sarah — search contacts\n"
                 "/google drive <query> — search Drive files\n"
                 "/google drive recent — recent files\n"
+                "/google drive read 1 — read file content\n"
+                "/google drive read budget — search and read\n"
                 "/google unlink — disconnect account\n"
                 "Or ask naturally: \"Am I free at 3pm?\", \"Any new emails?\"\n\n"
 

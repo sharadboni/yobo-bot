@@ -20,6 +20,7 @@ SCOPES = " ".join([
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/contacts.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/keep",
 ])
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 CALENDAR_API = "https://www.googleapis.com/calendar/v3"
@@ -27,6 +28,7 @@ GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 TASKS_API = "https://tasks.googleapis.com/tasks/v1"
 PEOPLE_API = "https://people.googleapis.com/v1"
 DRIVE_API = "https://www.googleapis.com/drive/v3"
+KEEP_API = "https://keep.googleapis.com/v1"
 TIMEOUT = 10
 NOT_LINKED = "Google account not linked. Use /google link to connect."
 EXPIRED = "Google access expired. Use /google link to reconnect."
@@ -568,7 +570,9 @@ async def search_drive(user_jid: str, query: str) -> list[dict] | str:
     files = []
     for f in data.get("files", []):
         files.append({
+            "id": f.get("id", ""),
             "name": f.get("name", ""),
+            "mimeType": f.get("mimeType", ""),
             "type": _drive_type(f.get("mimeType", "")),
             "modified": f.get("modifiedTime", "")[:10],
             "link": f.get("webViewLink", ""),
@@ -598,7 +602,9 @@ async def list_recent_drive(user_jid: str, max_results: int = 10) -> list[dict] 
     files = []
     for f in data.get("files", []):
         files.append({
+            "id": f.get("id", ""),
             "name": f.get("name", ""),
+            "mimeType": f.get("mimeType", ""),
             "type": _drive_type(f.get("mimeType", "")),
             "modified": f.get("modifiedTime", "")[:10],
             "link": f.get("webViewLink", ""),
@@ -650,5 +656,296 @@ def format_drive_files(files: list[dict]) -> str:
             line += f" — {f['modified']}"
         if f.get("size"):
             line += f" ({f['size']})"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+MAX_DRIVE_TEXT = 4000  # max chars to return to LLM
+
+# Google Workspace MIME → export format
+_EXPORT_MAP = {
+    "application/vnd.google-apps.document": ("text/plain", ".txt"),
+    "application/vnd.google-apps.spreadsheet": ("text/csv", ".csv"),
+    "application/vnd.google-apps.presentation": ("text/plain", ".txt"),
+}
+
+
+async def read_drive_file(user_jid: str, file_id: str, mime_type: str = "",
+                          file_name: str = "") -> str:
+    """Download and extract text content from a Drive file.
+    Supports Google Docs/Sheets/Slides, PDFs, images, and text files.
+    Returns extracted text or error string."""
+    token = await get_valid_token(user_jid)
+    if not token:
+        return NOT_LINKED
+
+    # If we don't know the mime type, fetch file metadata
+    if not mime_type:
+        try:
+            meta = await _authed_request(user_jid, "get",
+                f"{DRIVE_API}/files/{file_id}",
+                params={"fields": "mimeType,name"})
+            if isinstance(meta, str):
+                return meta
+            mime_type = meta.get("mimeType", "")
+            file_name = meta.get("name", file_name)
+        except httpx.HTTPError as e:
+            return f"Failed to get file info: {e}"
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # Google Workspace files: export
+            if mime_type in _EXPORT_MAP:
+                export_mime, _ = _EXPORT_MAP[mime_type]
+                resp = await client.get(
+                    f"{DRIVE_API}/files/{file_id}/export",
+                    headers=headers,
+                    params={"mimeType": export_mime},
+                )
+            else:
+                # Binary/regular files: download
+                resp = await client.get(
+                    f"{DRIVE_API}/files/{file_id}",
+                    headers=headers,
+                    params={"alt": "media"},
+                )
+
+            if resp.status_code == 401:
+                token = await refresh_access_token(user_jid)
+                if not token:
+                    return EXPIRED
+                headers = {"Authorization": f"Bearer {token}"}
+                if mime_type in _EXPORT_MAP:
+                    export_mime, _ = _EXPORT_MAP[mime_type]
+                    resp = await client.get(
+                        f"{DRIVE_API}/files/{file_id}/export",
+                        headers=headers,
+                        params={"mimeType": export_mime},
+                    )
+                else:
+                    resp = await client.get(
+                        f"{DRIVE_API}/files/{file_id}",
+                        headers=headers,
+                        params={"alt": "media"},
+                    )
+
+            resp.raise_for_status()
+            raw = resp.content
+
+    except httpx.HTTPError as e:
+        log.error("Drive download error: %s", e)
+        return f"Failed to download file: {e}"
+
+    # Extract text based on type
+    result = _extract_drive_content(raw, mime_type, file_name)
+
+    # Handle images async via vision model
+    if result.startswith("__IMAGE__:"):
+        from agent.services.llm import vision_completion
+        img_b64 = base64.b64encode(raw).decode("utf-8")
+        description = await vision_completion(img_b64, "Describe this image in detail.")
+        return f"[{file_name}]\n\n{description}"
+
+    return result
+
+
+def _extract_drive_content(raw: bytes, mime_type: str, file_name: str) -> str:
+    """Extract text from downloaded file bytes."""
+    import tempfile
+    import os
+
+    # Google Workspace exports come as text already
+    if mime_type in _EXPORT_MAP:
+        text = raw.decode("utf-8", errors="replace")
+        if len(text) > MAX_DRIVE_TEXT:
+            text = text[:MAX_DRIVE_TEXT] + f"\n\n[Truncated — showing first {MAX_DRIVE_TEXT} chars]"
+        return f"[{file_name}]\n\n{text}"
+
+    # PDF
+    if mime_type == "application/pdf":
+        try:
+            import fitz
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+                f.write(raw)
+                tmp = f.name
+            try:
+                doc = fitz.open(tmp)
+                pages = [page.get_text() for page in doc]
+                doc.close()
+                text = "\n\n".join(pages)
+            finally:
+                os.unlink(tmp)
+            if len(text) > MAX_DRIVE_TEXT:
+                text = text[:MAX_DRIVE_TEXT] + f"\n\n[Truncated — showing first {MAX_DRIVE_TEXT} chars]"
+            return f"[{file_name}]\n\n{text}"
+        except Exception as e:
+            return f"Failed to read PDF: {e}"
+
+    # Images — return marker, caller should use read_drive_file_with_vision instead
+    if mime_type.startswith("image/"):
+        return f"__IMAGE__:{file_name}"
+
+    # Text-based files
+    if mime_type.startswith("text/") or mime_type in (
+        "application/json", "application/xml", "application/javascript",
+    ):
+        text = raw.decode("utf-8", errors="replace")
+        if len(text) > MAX_DRIVE_TEXT:
+            text = text[:MAX_DRIVE_TEXT] + f"\n\n[Truncated — showing first {MAX_DRIVE_TEXT} chars]"
+        return f"[{file_name}]\n\n{text}"
+
+    return f"[{file_name}] Unsupported file type: {mime_type}. Cannot extract text."
+
+
+async def read_drive_file_with_vision(user_jid: str, file_id: str,
+                                       mime_type: str, file_name: str) -> str:
+    """Read a Drive image file using the vision model (async-safe)."""
+    token = await get_valid_token(user_jid)
+    if not token:
+        return NOT_LINKED
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{DRIVE_API}/files/{file_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"alt": "media"},
+            )
+            resp.raise_for_status()
+            raw = resp.content
+    except httpx.HTTPError as e:
+        return f"Failed to download image: {e}"
+
+    from agent.services.llm import vision_completion
+    img_b64 = base64.b64encode(raw).decode("utf-8")
+    description = await vision_completion(img_b64, "Describe this image in detail.")
+    return f"[{file_name}]\n\n{description}"
+
+
+# ── Keep ─────────────────────────────────────────────────────────────
+
+async def list_keep_notes(user_jid: str) -> list[dict] | str:
+    """List Google Keep notes."""
+    try:
+        data = await _authed_request(user_jid, "get",
+            f"{KEEP_API}/notes", params={"pageSize": "20"})
+    except httpx.HTTPError as e:
+        log.error("Keep API error: %s", e)
+        return f"Failed to fetch notes: {e}"
+
+    if isinstance(data, str):
+        return data
+
+    notes = []
+    for n in data.get("notes", []):
+        if n.get("trashed"):
+            continue
+        title = n.get("title", "")
+        # Extract text from body sections
+        body_parts = []
+        for section in n.get("body", {}).get("text", {}).get("list", []):
+            text = section.get("text", {}).get("text", "")
+            if text:
+                body_parts.append(text)
+        # Also handle simple text body
+        body_text = n.get("body", {}).get("text", {}).get("text", "")
+        if body_text:
+            body_parts = [body_text]
+        notes.append({
+            "name": n.get("name", ""),
+            "title": title or "(untitled)",
+            "body": "\n".join(body_parts)[:200],
+        })
+    return notes
+
+
+async def create_keep_note(user_jid: str, title: str, body: str = "") -> str:
+    """Create a Google Keep note."""
+    note_body = {"title": title}
+    if body:
+        note_body["body"] = {"text": {"text": body}}
+
+    try:
+        data = await _authed_request(user_jid, "post",
+            f"{KEEP_API}/notes", json_body=note_body)
+    except httpx.HTTPError as e:
+        log.error("Keep create error: %s", e)
+        return f"Failed to create note: {e}"
+
+    if isinstance(data, str):
+        return data
+    return f"Note created: {title}"
+
+
+async def get_keep_note(user_jid: str, note_name: str) -> str:
+    """Get a single Keep note by resource name."""
+    try:
+        data = await _authed_request(user_jid, "get", f"{KEEP_API}/{note_name}")
+    except httpx.HTTPError as e:
+        log.error("Keep get error: %s", e)
+        return f"Failed to fetch note: {e}"
+
+    if isinstance(data, str):
+        return data
+
+    title = data.get("title", "(untitled)")
+    body_text = data.get("body", {}).get("text", {}).get("text", "")
+    if not body_text:
+        # Try list items
+        parts = []
+        for section in data.get("body", {}).get("list", {}).get("listItems", []):
+            text = section.get("text", {}).get("text", "")
+            checked = section.get("checked", False)
+            prefix = "[x]" if checked else "[ ]"
+            if text:
+                parts.append(f"{prefix} {text}")
+        body_text = "\n".join(parts)
+
+    return f"{title}\n\n{body_text}" if body_text else title
+
+
+async def delete_keep_note(user_jid: str, note_name: str) -> str:
+    """Delete a Google Keep note."""
+    token = await get_valid_token(user_jid)
+    if not token:
+        return NOT_LINKED
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.delete(
+                f"{KEEP_API}/{note_name}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code == 401:
+                token = await refresh_access_token(user_jid)
+                if not token:
+                    return EXPIRED
+                resp = await client.delete(
+                    f"{KEEP_API}/{note_name}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            if resp.status_code in (200, 204):
+                return "Note deleted."
+            resp.raise_for_status()
+    except httpx.HTTPError as e:
+        log.error("Keep delete error: %s", e)
+        return f"Failed to delete note: {e}"
+    return "Note deleted."
+
+
+def format_keep_notes(notes: list[dict]) -> str:
+    if isinstance(notes, str):
+        return notes
+    if not notes:
+        return "No notes found."
+
+    lines = ["Keep notes:\n"]
+    for i, n in enumerate(notes, 1):
+        line = f"{i}. {n['title']}"
+        if n.get("body"):
+            preview = n["body"][:60].replace("\n", " ")
+            line += f"\n   {preview}..."
         lines.append(line)
     return "\n".join(lines)

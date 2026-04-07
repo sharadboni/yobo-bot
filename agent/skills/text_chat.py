@@ -12,7 +12,8 @@ CONTEXT_TURNS = min(20, MAX_HISTORY)
 
 _CLASSIFY_PROMPT = (
     "Decide if this message needs a data lookup (news, weather, prices, "
-    "companies, facts, events) or can be answered from general knowledge "
+    "companies, facts, events, calendar, emails, tasks, notes, contacts, "
+    "Drive files) or can be answered from general knowledge "
     "(greetings, math, coding, opinions, creative writing).\n"
     "When in doubt, output YES.\n"
     "Output ONLY: yes or no"
@@ -85,7 +86,8 @@ async def text_chat(state: dict) -> dict:
         executors = dict(TOOL_EXECUTORS)
         for tool_name in ("google_calendar_events", "google_calendar_create",
                           "google_gmail_unread", "google_tasks_list",
-                          "google_contacts_search", "google_drive_search"):
+                          "google_contacts_search", "google_drive_search",
+                          "google_drive_read"):
             orig = executors.get(tool_name)
             if orig:
                 executors[tool_name] = (lambda fn: lambda **kw: fn(**kw, user_jid=sender_jid))(orig)

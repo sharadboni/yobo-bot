@@ -13,7 +13,8 @@ from agent.services.google_api import (
     get_unread_emails, get_email_body, send_email, format_emails,
     get_tasks, add_task, complete_task, format_tasks,
     search_contacts, format_contacts,
-    search_drive, list_recent_drive, format_drive_files,
+    search_drive, list_recent_drive, read_drive_file, format_drive_files,
+    list_keep_notes, create_keep_note, get_keep_note, delete_keep_note, format_keep_notes,
 )
 
 log = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ async def google_cmd(state: dict) -> dict:
                 "/google contacts <name> — search contacts\n"
                 "/google drive <query> — search Drive files\n"
                 "/google drive recent — recent files\n"
+                "/google drive read 1 — read file content\n"
                 "/google unlink — disconnect account"
             )}
         return {"reply_text": (
@@ -223,11 +225,100 @@ async def google_cmd(state: dict) -> dict:
     if subcmd == "drive":
         if not is_linked(sender):
             return {"reply_text": _NOT_LINKED}
-        if not sub_args or sub_args.lower() == "recent":
+
+        drive_parts = sub_args.split(None, 1) if sub_args else []
+        drive_action = drive_parts[0].lower() if drive_parts else ""
+        drive_args = drive_parts[1] if len(drive_parts) > 1 else ""
+
+        if drive_action == "read":
+            # Read by number from last search/list, or by search query
+            if drive_args.strip().isdigit():
+                idx = int(drive_args.strip())
+                # Get recent files to find by index
+                files = await list_recent_drive(sender)
+                if isinstance(files, str):
+                    return {"reply_text": files}
+                if idx < 1 or idx > len(files):
+                    return {"reply_text": f"Invalid file number. Use /google drive to list files."}
+                f = files[idx - 1]
+                content = await read_drive_file(sender, f["id"], f.get("mimeType", ""), f.get("name", ""))
+                if len(content) > 3000:
+                    content = content[:3000] + "\n\n[Truncated]"
+                return {"reply_text": content}
+            elif drive_args:
+                # Search and read first match
+                files = await search_drive(sender, drive_args.strip())
+                if isinstance(files, str):
+                    return {"reply_text": files}
+                if not files:
+                    return {"reply_text": f"No files found matching '{drive_args}'."}
+                f = files[0]
+                content = await read_drive_file(sender, f["id"], f.get("mimeType", ""), f.get("name", ""))
+                if len(content) > 3000:
+                    content = content[:3000] + "\n\n[Truncated]"
+                return {"reply_text": content}
+            else:
+                return {"reply_text": "Usage: /google drive read <number> or /google drive read <search query>"}
+
+        if not sub_args or drive_action == "recent":
             files = await list_recent_drive(sender)
         else:
             files = await search_drive(sender, sub_args.strip())
         return {"reply_text": format_drive_files(files)}
+
+    # ── Keep Notes ───────────────────────────────────────────────
+    if subcmd == "notes":
+        if not is_linked(sender):
+            return {"reply_text": _NOT_LINKED}
+        notes = await list_keep_notes(sender)
+        return {"reply_text": format_keep_notes(notes)}
+
+    if subcmd == "note":
+        if not is_linked(sender):
+            return {"reply_text": _NOT_LINKED}
+
+        note_parts = sub_args.split(None, 1)
+        if not note_parts:
+            return {"reply_text": "Usage: /google note add <title> | <body>, /google note read <number>, /google note delete <number>"}
+
+        action = note_parts[0].lower()
+        note_args = note_parts[1] if len(note_parts) > 1 else ""
+
+        if action == "add":
+            if not note_args:
+                return {"reply_text": "Usage: /google note add <title> | <body>"}
+            if "|" in note_args:
+                title, body = note_args.split("|", 1)
+                result = await create_keep_note(sender, title.strip(), body.strip())
+            else:
+                result = await create_keep_note(sender, note_args.strip())
+            return {"reply_text": result}
+
+        if action == "read":
+            idx = int(note_args.strip()) if note_args.strip().isdigit() else 0
+            if idx < 1:
+                return {"reply_text": "Usage: /google note read <number> (from /google notes list)"}
+            notes = await list_keep_notes(sender)
+            if isinstance(notes, str):
+                return {"reply_text": notes}
+            if idx > len(notes):
+                return {"reply_text": f"Only {len(notes)} notes."}
+            content = await get_keep_note(sender, notes[idx - 1]["name"])
+            return {"reply_text": content}
+
+        if action in ("delete", "remove"):
+            idx = int(note_args.strip()) if note_args.strip().isdigit() else 0
+            if idx < 1:
+                return {"reply_text": "Usage: /google note delete <number>"}
+            notes = await list_keep_notes(sender)
+            if isinstance(notes, str):
+                return {"reply_text": notes}
+            if idx > len(notes):
+                return {"reply_text": f"Only {len(notes)} notes."}
+            result = await delete_keep_note(sender, notes[idx - 1]["name"])
+            return {"reply_text": result}
+
+        return {"reply_text": "Usage: /google note add <title> | <body>, /google note read <number>, /google note delete <number>"}
 
     return {"reply_text": "Unknown subcommand. Use /google for help."}
 
