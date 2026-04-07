@@ -20,8 +20,6 @@ SCOPES = " ".join([
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/contacts.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
-    "https://www.googleapis.com/auth/keep",
-    "https://www.googleapis.com/auth/keep.readonly",
 ])
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 CALENDAR_API = "https://www.googleapis.com/calendar/v3"
@@ -29,7 +27,6 @@ GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 TASKS_API = "https://tasks.googleapis.com/tasks/v1"
 PEOPLE_API = "https://people.googleapis.com/v1"
 DRIVE_API = "https://www.googleapis.com/drive/v3"
-KEEP_API = "https://keep.googleapis.com/v1"
 TIMEOUT = 10
 NOT_LINKED = "Google account not linked. Use /google link to connect."
 EXPIRED = "Google access expired. Use /google link to reconnect."
@@ -825,128 +822,3 @@ async def read_drive_file_with_vision(user_jid: str, file_id: str,
     return f"[{file_name}]\n\n{description}"
 
 
-# ── Keep ─────────────────────────────────────────────────────────────
-
-async def list_keep_notes(user_jid: str) -> list[dict] | str:
-    """List Google Keep notes."""
-    try:
-        data = await _authed_request(user_jid, "get",
-            f"{KEEP_API}/notes", params={"pageSize": "20"})
-    except httpx.HTTPError as e:
-        log.error("Keep API error: %s", e)
-        return f"Failed to fetch notes: {e}"
-
-    if isinstance(data, str):
-        return data
-
-    notes = []
-    for n in data.get("notes", []):
-        if n.get("trashed"):
-            continue
-        title = n.get("title", "")
-        # Extract text from body sections
-        body_parts = []
-        for section in n.get("body", {}).get("text", {}).get("list", []):
-            text = section.get("text", {}).get("text", "")
-            if text:
-                body_parts.append(text)
-        # Also handle simple text body
-        body_text = n.get("body", {}).get("text", {}).get("text", "")
-        if body_text:
-            body_parts = [body_text]
-        notes.append({
-            "name": n.get("name", ""),
-            "title": title or "(untitled)",
-            "body": "\n".join(body_parts)[:200],
-        })
-    return notes
-
-
-async def create_keep_note(user_jid: str, title: str, body: str = "") -> str:
-    """Create a Google Keep note."""
-    note_body = {"title": title}
-    if body:
-        note_body["body"] = {"text": {"text": body}}
-
-    try:
-        data = await _authed_request(user_jid, "post",
-            f"{KEEP_API}/notes", json_body=note_body)
-    except httpx.HTTPError as e:
-        log.error("Keep create error: %s", e)
-        return f"Failed to create note: {e}"
-
-    if isinstance(data, str):
-        return data
-    return f"Note created: {title}"
-
-
-async def get_keep_note(user_jid: str, note_name: str) -> str:
-    """Get a single Keep note by resource name."""
-    try:
-        data = await _authed_request(user_jid, "get", f"{KEEP_API}/{note_name}")
-    except httpx.HTTPError as e:
-        log.error("Keep get error: %s", e)
-        return f"Failed to fetch note: {e}"
-
-    if isinstance(data, str):
-        return data
-
-    title = data.get("title", "(untitled)")
-    body_text = data.get("body", {}).get("text", {}).get("text", "")
-    if not body_text:
-        # Try list items
-        parts = []
-        for section in data.get("body", {}).get("list", {}).get("listItems", []):
-            text = section.get("text", {}).get("text", "")
-            checked = section.get("checked", False)
-            prefix = "[x]" if checked else "[ ]"
-            if text:
-                parts.append(f"{prefix} {text}")
-        body_text = "\n".join(parts)
-
-    return f"{title}\n\n{body_text}" if body_text else title
-
-
-async def delete_keep_note(user_jid: str, note_name: str) -> str:
-    """Delete a Google Keep note."""
-    token = await get_valid_token(user_jid)
-    if not token:
-        return NOT_LINKED
-
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.delete(
-                f"{KEEP_API}/{note_name}",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            if resp.status_code == 401:
-                token = await refresh_access_token(user_jid)
-                if not token:
-                    return EXPIRED
-                resp = await client.delete(
-                    f"{KEEP_API}/{note_name}",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-            if resp.status_code in (200, 204):
-                return "Note deleted."
-            resp.raise_for_status()
-    except httpx.HTTPError as e:
-        log.error("Keep delete error: %s", e)
-        return f"Failed to delete note: {e}"
-    return "Note deleted."
-
-
-def format_keep_notes(notes: list[dict]) -> str:
-    if isinstance(notes, str):
-        return notes
-    if not notes:
-        return "No notes found."
-
-    lines = ["Keep notes:\n"]
-    for i, n in enumerate(notes, 1):
-        line = f"{i}. {n['title']}"
-        if n.get("body"):
-            preview = n["body"][:60].replace("\n", " ")
-            line += f"\n   {preview}..."
-        lines.append(line)
-    return "\n".join(lines)

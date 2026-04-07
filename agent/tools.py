@@ -1038,31 +1038,6 @@ async def google_drive_read(query: str, user_jid: str = "") -> str:
     return sanitize_tool_output(content, source="google_drive")
 
 
-async def google_keep_notes(user_jid: str = "") -> str:
-    """List Google Keep notes. user_jid injected via closure."""
-    if not user_jid:
-        return "Cannot access Google: no user context."
-    from agent.services.google_store import is_linked
-    if not is_linked(user_jid):
-        return "Google account not linked. The user needs to run /google link first."
-    from agent.services.google_api import list_keep_notes, format_keep_notes
-    notes = await list_keep_notes(user_jid)
-    result = format_keep_notes(notes)
-    return sanitize_tool_output(result, source="google_keep")
-
-
-async def google_keep_create(title: str, body: str = "", user_jid: str = "") -> str:
-    """Create a Google Keep note. user_jid injected via closure."""
-    if not user_jid:
-        return "Cannot access Google: no user context."
-    from agent.services.google_store import is_linked
-    if not is_linked(user_jid):
-        return "Google account not linked. The user needs to run /google link first."
-    from agent.services.google_api import create_keep_note
-    result = await create_keep_note(user_jid, title, body)
-    return sanitize_tool_output(result, source="google_keep")
-
-
 TOOL_EXECUTORS = {
     "web_search": web_search,
     "news_search": news_search,
@@ -1076,7 +1051,4 @@ TOOL_EXECUTORS = {
     "google_contacts_search": google_contacts_search,
     "google_drive_search": google_drive_search,
     "google_drive_read": google_drive_read,
-    # Keep tools disabled — API restricted to Workspace accounts
-    # "google_keep_notes": google_keep_notes,
-    # "google_keep_create": google_keep_create,
 }

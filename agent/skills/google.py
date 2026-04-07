@@ -14,7 +14,6 @@ from agent.services.google_api import (
     get_tasks, add_task, complete_task, format_tasks,
     search_contacts, format_contacts,
     search_drive, list_recent_drive, read_drive_file, format_drive_files,
-    list_keep_notes, create_keep_note, get_keep_note, delete_keep_note, format_keep_notes,
 )
 
 log = logging.getLogger(__name__)
@@ -265,60 +264,6 @@ async def google_cmd(state: dict) -> dict:
         else:
             files = await search_drive(sender, sub_args.strip())
         return {"reply_text": format_drive_files(files)}
-
-    # ── Keep Notes ───────────────────────────────────────────────
-    if subcmd == "notes":
-        if not is_linked(sender):
-            return {"reply_text": _NOT_LINKED}
-        notes = await list_keep_notes(sender)
-        return {"reply_text": format_keep_notes(notes)}
-
-    if subcmd == "note":
-        if not is_linked(sender):
-            return {"reply_text": _NOT_LINKED}
-
-        note_parts = sub_args.split(None, 1)
-        if not note_parts:
-            return {"reply_text": "Usage: /google note add <title> | <body>, /google note read <number>, /google note delete <number>"}
-
-        action = note_parts[0].lower()
-        note_args = note_parts[1] if len(note_parts) > 1 else ""
-
-        if action == "add":
-            if not note_args:
-                return {"reply_text": "Usage: /google note add <title> | <body>"}
-            if "|" in note_args:
-                title, body = note_args.split("|", 1)
-                result = await create_keep_note(sender, title.strip(), body.strip())
-            else:
-                result = await create_keep_note(sender, note_args.strip())
-            return {"reply_text": result}
-
-        if action == "read":
-            idx = int(note_args.strip()) if note_args.strip().isdigit() else 0
-            if idx < 1:
-                return {"reply_text": "Usage: /google note read <number> (from /google notes list)"}
-            notes = await list_keep_notes(sender)
-            if isinstance(notes, str):
-                return {"reply_text": notes}
-            if idx > len(notes):
-                return {"reply_text": f"Only {len(notes)} notes."}
-            content = await get_keep_note(sender, notes[idx - 1]["name"])
-            return {"reply_text": content}
-
-        if action in ("delete", "remove"):
-            idx = int(note_args.strip()) if note_args.strip().isdigit() else 0
-            if idx < 1:
-                return {"reply_text": "Usage: /google note delete <number>"}
-            notes = await list_keep_notes(sender)
-            if isinstance(notes, str):
-                return {"reply_text": notes}
-            if idx > len(notes):
-                return {"reply_text": f"Only {len(notes)} notes."}
-            result = await delete_keep_note(sender, notes[idx - 1]["name"])
-            return {"reply_text": result}
-
-        return {"reply_text": "Usage: /google note add <title> | <body>, /google note read <number>, /google note delete <number>"}
 
     return {"reply_text": "Unknown subcommand. Use /google for help."}
 
