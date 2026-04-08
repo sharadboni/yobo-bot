@@ -132,11 +132,15 @@ TOOLS = [
             },
         },
     },
+]
+
+# Google tools — only included when the user has linked their Google account
+GOOGLE_TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "google_calendar_events",
-            "description": "Get the user's Google Calendar events for a date. Only works if the user has linked their Google account.",
+            "description": "Get the user's Google Calendar events for a date.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -157,7 +161,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "google_calendar_create",
-            "description": "Create a Google Calendar event or schedule something on the user's calendar. Use this for meetings, appointments, reminders with specific times, and tasks the user wants on their calendar. Only works if the user has linked their Google account.",
+            "description": "Create a Google Calendar event or schedule something on the user's calendar. Use this for meetings, appointments, reminders with specific times, and tasks the user wants on their calendar.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -190,7 +194,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "google_gmail_unread",
-            "description": "Get the user's unread emails from Gmail inbox. Only works if the user has linked their Google account.",
+            "description": "Get the user's unread emails from Gmail inbox.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -207,7 +211,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "google_tasks_list",
-            "description": "Get the user's pending Google Tasks (to-do list items without specific times). Only works if the user has linked their Google account.",
+            "description": "Get the user's pending Google Tasks (to-do list items without specific times).",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -219,7 +223,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "google_contacts_search",
-            "description": "Search the user's Google Contacts by name or email. Only works if the user has linked their Google account.",
+            "description": "Search the user's Google Contacts by name or email.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -236,7 +240,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "google_drive_search",
-            "description": "Search the user's Google Drive files by name or content. Only works if the user has linked their Google account.",
+            "description": "Search the user's Google Drive files by name or content.",
             "parameters": {
                 "type": "object",
                 "properties": {

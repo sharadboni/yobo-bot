@@ -41,16 +41,31 @@ def get_system_prompt_fast() -> str:
     )
 
 
-def get_system_prompt_tools() -> str:
+def get_system_prompt_tools(google_linked: bool = False) -> str:
     """For the tool-calling model (9B). Tool imperative FIRST."""
+    if google_linked:
+        data_scope = "or the user's personal data (calendar, emails, tasks, notes, contacts, Drive files)"
+        tool_list = "news_search, weather, web_search, wikipedia, read_page, and Google tools (calendar, gmail, tasks, contacts, drive)"
+        google_routing = (
+            "- Calendar events, schedule, free/busy: google_calendar_events\n"
+            "- Create calendar event, schedule meeting: google_calendar_create\n"
+            "- Unread emails, inbox: google_gmail_unread\n"
+            "- To-do list, pending tasks: google_tasks_list\n"
+            "- Find contact by name/email: google_contacts_search\n"
+            "- Search Google Drive files: google_drive_search\n"
+            "- Read a Google Drive file (Docs, Sheets, PDFs, images, text): google_drive_read\n"
+        )
+    else:
+        data_scope = ""
+        tool_list = "news_search, weather, web_search, wikipedia, read_page"
+        google_routing = ""
+
     return _inject_date(
         "You MUST call a tool before answering any question about news, weather, "
-        "prices, companies, people, events, current data, or the user's personal data "
-        "(calendar, emails, tasks, notes, contacts, Drive files). Do not answer from memory. "
+        f"prices, companies, people, events, current data{', ' + data_scope if data_scope else ''}. "
+        "Do not answer from memory. "
         "Even if similar data appears in the chat history, always fetch fresh results.\n\n"
-        "You are Yobo, a WhatsApp assistant with tools: news_search, weather, "
-        "web_search, wikipedia, read_page, and Google tools (calendar, gmail, tasks, "
-        "contacts, drive, keep). Today is {date}.\n"
+        f"You are Yobo, a WhatsApp assistant with tools: {tool_list}. Today is {{date}}.\n"
         "Reply in the user's language.\n\n"
         "Tool routing:\n"
         "- News, headlines, current events: news_search\n"
@@ -58,14 +73,7 @@ def get_system_prompt_tools() -> str:
         "- Facts, people, history: wikipedia\n"
         "- Prices, general queries: web_search\n"
         "- Deep dive into a URL: read_page\n"
-        "- Calendar events, schedule, free/busy: google_calendar_events\n"
-        "- Create calendar event, schedule meeting: google_calendar_create\n"
-        "- Unread emails, inbox: google_gmail_unread\n"
-        "- To-do list, pending tasks: google_tasks_list\n"
-        "- Find contact by name/email: google_contacts_search\n"
-        "- Search Google Drive files: google_drive_search\n"
-        "- Read a Google Drive file (Docs, Sheets, PDFs, images, text): google_drive_read\n"
-        "- Google Keep is NOT available (API restricted to Workspace accounts). Suggest using Google Tasks instead.\n"
+        f"{google_routing}"
         "- When unsure, call a tool anyway.\n\n"
         "Response rules:\n"
         "- Never narrate your search process. Just give the answer.\n"

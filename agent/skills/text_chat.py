@@ -4,11 +4,17 @@ import logging
 from agent.services.llm import chat_completion, chat_completion_with_tools, chat_completion_fast
 from agent.config import get_system_prompt_fast, get_system_prompt_tools, get_system_prompt_document, MAX_HISTORY
 from agent.constants import MAX_TOKENS_CLASSIFIER, TEMP_CLASSIFIER
-from agent.tools import TOOLS, TOOL_EXECUTORS
+from agent.tools import TOOLS, GOOGLE_TOOLS, TOOL_EXECUTORS
+from agent.services.google_store import is_linked
 
 log = logging.getLogger(__name__)
 
 CONTEXT_TURNS = min(20, MAX_HISTORY)
+
+# Max characters of history to include in the prompt.
+# ~4 chars/token, 8K context budget for history → 32K chars.
+_MAX_HISTORY_CHARS = 32_000
+_MAX_ENTRY_CHARS = 4_000  # truncate individual entries beyond this
 
 _CLASSIFY_PROMPT = (
     "Decide if this message needs a data lookup (news, weather, prices, "
@@ -40,14 +46,17 @@ def _build_messages(system_prompt: str, profile: dict, resolved_text: str, inclu
 
     History entries with metadata get the meta injected as context
     so the LLM can reference sources/URLs for follow-ups.
+    Large entries are truncated and total history is capped to avoid
+    overflowing model context windows.
     """
     messages = [{"role": "system", "content": system_prompt}]
     if include_history:
+        total_chars = 0
+        history_msgs = []
         for entry in profile.get("history", [])[-CONTEXT_TURNS:]:
             content = entry["content"]
             meta = entry.get("meta")
             if meta:
-                # Inject metadata as hidden context the LLM can reference
                 parts = [content]
                 if meta.get("sources"):
                     parts.append(f"\n[Sources: {', '.join(meta['sources'])}]")
@@ -55,7 +64,16 @@ def _build_messages(system_prompt: str, profile: dict, resolved_text: str, inclu
                     url_list = "\n".join(f"- {u}" for u in meta["urls"])
                     parts.append(f"\n[Reference URLs:\n{url_list}]")
                 content = "".join(parts)
-            messages.append({"role": entry["role"], "content": content})
+            # Truncate oversized individual entries
+            if len(content) > _MAX_ENTRY_CHARS:
+                content = content[:_MAX_ENTRY_CHARS] + "\n...[truncated]"
+            history_msgs.append({"role": entry["role"], "content": content})
+            total_chars += len(content)
+        # If total history exceeds budget, keep only the most recent entries
+        while total_chars > _MAX_HISTORY_CHARS and history_msgs:
+            removed = history_msgs.pop(0)
+            total_chars -= len(removed["content"])
+        messages.extend(history_msgs)
     messages.append({"role": "user", "content": resolved_text})
     return messages
 
@@ -79,21 +97,28 @@ async def text_chat(state: dict) -> dict:
     needs = await _needs_tools(resolved)
 
     if needs:
-        log.info("Routing to tool-calling model for: %s", resolved[:60])
-        messages = _build_messages(get_system_prompt_tools(), profile, resolved)
-        # Inject sender_jid into Google tools via closure
         sender_jid = state.get("sender_jid") or state.get("user_jid", "")
+        google_linked = is_linked(sender_jid)
+        log.info("Routing to tool-calling model for: %s (google=%s)", resolved[:60], google_linked)
+        messages = _build_messages(get_system_prompt_tools(google_linked=google_linked), profile, resolved)
         executors = dict(TOOL_EXECUTORS)
-        for tool_name in ("google_calendar_events", "google_calendar_create",
-                          "google_gmail_unread", "google_tasks_list",
-                          "google_contacts_search", "google_drive_search",
-                          "google_drive_read"):
-            orig = executors.get(tool_name)
-            if orig:
-                executors[tool_name] = (lambda fn: lambda **kw: fn(**kw, user_jid=sender_jid))(orig)
+
+        # Only include Google tools if the sender has linked their account
+        if google_linked:
+            tools = TOOLS + GOOGLE_TOOLS
+            for tool_name in ("google_calendar_events", "google_calendar_create",
+                              "google_gmail_unread", "google_tasks_list",
+                              "google_contacts_search", "google_drive_search",
+                              "google_drive_read"):
+                orig = executors.get(tool_name)
+                if orig:
+                    executors[tool_name] = (lambda fn: lambda **kw: fn(**kw, user_jid=sender_jid))(orig)
+        else:
+            tools = TOOLS
+
         try:
             reply = await chat_completion_with_tools(
-                messages, tools=TOOLS, tool_executor=executors,
+                messages, tools=tools, tool_executor=executors,
                 max_rounds=5,
             )
         except Exception as e:
